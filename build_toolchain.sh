@@ -411,6 +411,9 @@ echo "patch $WORKDIR/$GCC/gcc/doc/cppopts.texi $SRCDIR/patch-cppopts.texi.diff" 
 patch $WORKDIR/$GCC/gcc/doc/cppopts.texi $SRCDIR/patch-cppopts.texi.diff
 echo "patch $WORKDIR/$GCC/gcc/doc/invoke.texi $SRCDIR/patch-invoke-texi.diff" >> $COMMAND_LOG
 patch $WORKDIR/$GCC/gcc/doc/invoke.texi $SRCDIR/patch-invoke-texi.diff
+echo "patch $WORKDIR/$GCC/gcc/doc/generic.texi $SRCDIR/patch-generic-texi.diff" >> $COMMAND_LOG
+patch $WORKDIR/$GCC/gcc/doc/generic.texi $SRCDIR/patch-generic-texi.diff
+
 
 echo -e "$STAT Unpacking and renaming $GCC requirements..."
 echo "cp $SRCDIR/$GMP.tar.gz $WORKDIR/$GCC" >> $COMMAND_LOG
@@ -467,3 +470,4 @@ echo "| (_| | (_) | | | |  __/ "
 echo " \__,_|\___/|_| |_|\___| "
 echo "                         "
 echo -e "$END"
+    
