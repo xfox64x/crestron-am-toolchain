@@ -13,12 +13,17 @@ Source Versions:
 My first target reports itself as a Crestron wm8750 AM-100 v1.1.11 - the original. An untouched virgin. This is, of course, ultra vulnerable to numerous remote command execution, as root, methods. I have gained access to the host (and many like it), I want to upload a GDB server to the host, and continue other exploit development and research. To do so, I need to cross compile gdbserver correctly, and this repo is a summation of my efforts to do so. Now, let's profile the host.
 
 "uname -a":
+```
   Linux Crestron.AirMedia-1.1.wm8750 2.6.32.9-default #3 Mon Aug 25 16:02:49 CST 2014 armv6l GNU/Linux
+```
 
 If we "cat /proc/version", we get this nice info:
+```
   Linux version 2.6.32.9-default (tutu@eds1) (gcc version 4.5.1 (Sourcery G++ Lite 2010.09-50) ) #3 Mon Aug 25 16:02:49 CST 2014
+```
 
 Next, we'll "cat /proc/cpuinfo":
+```
         Processor       : ARMv6-compatible processor rev 7 (v6l)
         BogoMIPS        : 532.24
         Features        : swp half thumb fastmult vfp edsp java 
@@ -30,9 +35,10 @@ Next, we'll "cat /proc/cpuinfo":
         Hardware        : WMT
         Revision        : 0000
         Serial          : 0000000000000000
-
+```
 Dynamic linker: /lib/ld-linux.so.3 -> /lib/ld-2.11.1.so
-    ELF Header:
+```  
+  ELF Header:
       Magic:   7f 45 4c 46 01 01 01 00 00 00 00 00 00 00 00 00 
       Class:                             ELF32
       Data:                              2's complement, little endian
@@ -60,5 +66,5 @@ Dynamic linker: /lib/ld-linux.so.3 -> /lib/ld-2.11.1.so
       Tag_ABI_optimization_goals: Aggressive Speed
     Symbol table '.dynsym' contains 28 entries:
       ... entries suggest glibc 2.4, so we'll se how that goes ...
-
+```
 Very first obvious thing to do is download the exact toolchain used (Sourcery G++ Lite 2010.09-50). Would love to, but it doesn't seem to be available for free, anymore (also this is a learning oportunity), so we're left with notes and things from other people as to what was in the toolchain.
