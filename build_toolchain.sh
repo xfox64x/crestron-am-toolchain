@@ -3,23 +3,16 @@
 set -e
 set -u
 
-# This directory is used as root for all operations
-BASE=$(dirname "$0")
-BASE=$(cd "$BASE" && pwd)
+# Directory this script is in. Used as BASE dir if no BASE dir is supplied.
+BASEDIR=$(cd $(dirname $0); pwd)
 
+# Max out the number of parallel jobs we can do.
+PARALLEL="-j$(nproc)"
+
+# Software versions, architecture, and build target to use:
+ARCH=arm
 TARGET=arm-unknown-linux-gnueabi
 BUILD=$(gcc -dumpmachine)
-ARCH=arm
-
-SYSROOT="$BASE/sysroot"     # files for the target system 
-TOOLCHAIN="$BASE/toolchain" # the cross compilers
-SRCDIR="$BASE/src"          # saving tarballs
-WORKDIR="$BASE/work"        # unpacked tarballs
-BUILDDIR="$BASE/build"      # running compile 
-LOGDIR="$BASE/logs"         # various logs
-PARALLEL="-j$(nproc)"       # use all of the cores we got
-
-# Software Versions to use
 BINUTILS=binutils-2.20.1
 KERNEL=linux-2.6.32.9
 GCC=gcc-4.5.1
@@ -40,8 +33,69 @@ BAD="[$RED-$END]"
 STAT="[$GREY*$END]"
 WARN="[$YELLOW!$END]"
 
+# Command line arguments: 
+POSITIONAL=()           # Save positional command line arguments for later.
+RESTART_BUILD=false     # Whether WORKDIR and BUILDDIR should be removed before building.
+RESTART_TOOLCHAIN=false # Whether WORKDIR, BUILDDIR, TOOLCHAIN, SYSROOT should be removed before building.
+RESTART_ALL=false       # Whether WORKDIR, BUILDDIR, TOOLCHAIN, SYSROOT, SRCDIR should be removed before the build process.
+CLEAN=false             # Whether all dirs created by this script should be removed.
+COMMAND_LOG_INITIALIZED=false   # Whether the log dir and command log exist
+FORCE_BUILD_BINUTILS=false      # Whether this is a partial build, rebuilding binutils.
+FORCE_BUILD_GCCSTATIC=false     # Whether this is a partial build, rebuilding gcc-static.
+FORCE_BUILD_KERNEL_HEADERS=false  # Whether this is a partial build, rebuilding the kernel headers.
+FORCE_BUILD_GLIBC=false         # Whether this is a partial build, rebuilding glibc.
+FORCE_BUILD_GLIBC_HEADERS=false  # Whether this is a partial build, rebuilding glibc.
+FORCE_BUILD_GCCMINIMAL=false    # Whether this is a partial build, rebuilding gcc-minimal.
+FORCE_BUILD_GCCFULL=false       # Whether this is a partial build, rebuilding gcc-full.
 
-success_message(){
+initialize_command_log(){
+    mkdir -p $LOGDIR
+    rm -f $LOGDIR/*
+    COMMAND_LOG="$LOGDIR/command.log"
+    echo "" > $COMMAND_LOG
+    COMMAND_LOG_INITIALIZED=true
+}
+
+echo_directories(){
+    echo -e "$GOOD BASE:        $BASE"
+    echo -e "$GOOD BUILDDIR:    $BUILDDIR"
+    echo -e "$GOOD COMMAND_LOG: $LOGDIR"
+    echo -e "$GOOD LOGDIR:      $LOGDIR"
+    echo -e "$GOOD SRCDIR:      $SRCDIR"
+    echo -e "$GOOD SYSROOT:     $SYSROOT"
+    echo -e "$GOOD TOOLCHAIN:   $TOOLCHAIN"
+    echo -e "$GOOD WORKDIR:     $WORKDIR"
+}
+
+set_directories(){
+    SYSROOT="$BASE/sysroot"     # files for the target system 
+    TOOLCHAIN="$BASE/toolchain" # the cross compilers
+    SRCDIR="$BASE/src"          # saving tarballs
+    WORKDIR="$BASE/work"        # unpacked tarballs
+    BUILDDIR="$BASE/build"      # running compile 
+    LOGDIR="$BASE/logs"         # various logs
+}
+
+set_base_directory(){
+    BASE=${1:-$BASEDIR}
+    if [ ! -d "$BASE" ]; then
+        mkdir -p $BASE
+        if [ ! -d "$BASE" ]; then
+            echo -e "$BAD $RED""Failed to make base dir:$END $BASE"
+            echo -e "$BAD Aborting..."
+            exit 1
+        fi
+    fi
+    cd $BASE
+    if [ "`pwd`" != "$BASE" ]; then
+        echo -e "$BAD $RED""Failed to transition into base dir:$END $BASE"
+        echo -e "$BAD Aborting..."
+        exit 1
+    fi
+    set_directories
+}
+
+build_success_message(){
     echo -e "$GREEN"
     echo " ___                    "
     echo "|   \  ___  _ __   ___  "
@@ -53,7 +107,7 @@ success_message(){
     exit 1
 }
 
-failed_message(){
+build_failed_message(){
     echo -e "$RED"
     echo " _____       _  _           _ "
     echo "| ____| ___ |_|| | ___   __| |"
@@ -80,6 +134,8 @@ set_default_shell(){
         else
             do_msg "Setup" "Successfully set default shell to bash." "GOOD"
         fi
+        do_msg "Setup" "Please restart this script." "GOOD"
+        exit 1
     fi
 }
 
@@ -105,12 +161,21 @@ install_missing_package() {
     fi
 }
 
-# Makes directories for the supplied path, including parents, and logs the oepration to the command log. 
+# Makes directories for the supplied path, including parents, and logs the operation to the command log. 
 make_dir() {
     dir_path=$1
     if [ ! -d "$dir_path" ]; then
         echo "mkdir -p $dir_path" >> $COMMAND_LOG
         mkdir -p $dir_path
+    fi
+}
+
+# Removes directories at the supplied path and logs the operation to the command log. 
+remove_dir() {
+    dir_path=$1
+    if [ -d "$dir_path" ]; then
+        echo "rm -rf $dir_path" >> $COMMAND_LOG
+        rm -rf $dir_path
     fi
 }
 
@@ -177,7 +242,7 @@ unpack() {
 check_done() {
 	OBJ=$1
 	if [ -f $BUILDDIR/$OBJ.done ]; then
-		echo "already done"
+		do_msg "$OBJ" "Already done." "GOOD"
 		return 0
 	fi
 	return 1
@@ -207,13 +272,18 @@ do_msg() {
 
 binutils() {
 	OBJ=$BINUTILS
-	do_msg $OBJ "start configure"
 	check_done $OBJ && return 0
+	do_msg $OBJ "start configure"
+	
+	get_url "https://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2"
+	unpack "$BINUTILS.tar.bz2"
+	
 	echo "mkdir -p $BUILDDIR/$OBJ" >> $COMMAND_LOG
 	mkdir -p $BUILDDIR/$OBJ
 	pushd $BUILDDIR/$OBJ
 	if [ ! -f Makefile ]; then
 	    echo "$WORKDIR/$OBJ/configure --target=$TARGET --prefix=$TOOLCHAIN --with-sysroot=$SYSROOT --disable-nls --disable-werror" >> $COMMAND_LOG
+	    
 		$WORKDIR/$OBJ/configure \
 			--target=$TARGET \
 			--prefix=$TOOLCHAIN \
@@ -230,15 +300,37 @@ binutils() {
 	do_msg $OBJ "done"
 	echo "touch $BUILDDIR/$OBJ.done" >> $COMMAND_LOG
 	touch $BUILDDIR/$OBJ.done
-	popd
+	DONTCARE=popd
 }
 
 gccstatic() {
-	# static gcc, only C, able to compile the libc
-	# would be enough if we only compile kernels
 	OBJ=$GCC-static
-	do_msg $OBJ "start configure"
 	check_done $OBJ && return 0
+	do_msg $OBJ "start configure"
+	
+	get_url "https://ftp.gnu.org/gnu/gcc/$GCC/$GCC.tar.bz2"
+    get_url "https://ftp.gnu.org/gnu/gmp/$GMP.tar.gz"	
+    get_url "https://ftp.gnu.org/gnu/mpfr/$MPFR.tar.gz"
+    get_url "https://gcc.gnu.org/pub/gcc/infrastructure/$MPC.tar.gz"
+    #get_url "https://osmocom.org/attachments/download/2798/patch-gcc46-texi.diff"
+	
+	unpack "$GCC.tar.bz2"
+    unpack "$GMP.tar.gz" "$WORKDIR/$GCC" "gmp"
+    unpack "$MPFR.tar.gz" "$WORKDIR/$GCC" "mpfr"
+    unpack "$MPC.tar.gz" "$WORKDIR/$GCC" "mpc"
+	
+	# Patching texinfo issues affecting gcc: https://osmocom.org/issues/1916
+    # Not really sure how the syntax gets fucked up in only a few places...
+    do_patch $WORKDIR/$GCC/gcc/doc/gcc.texi $SRCDIR/patch-gcc46-texi.diff
+    do_patch $WORKDIR/$GCC/gcc/doc/cppopts.texi $SRCDIR/patch-cppopts.texi.diff
+    do_patch $WORKDIR/$GCC/gcc/doc/invoke.texi $SRCDIR/patch-invoke-texi.diff
+    do_patch $WORKDIR/$GCC/gcc/doc/generic.texi $SRCDIR/patch-generic-texi.diff
+	# TODO: Unsure if these two should be patched or if installing gperf is the answer.
+    # patch-gcc-cfns-gperf.diff is necessary
+    # https://github.com/parallaxinc/propgcc/issues/79
+    do_patch $WORKDIR/$GCC/gcc/cp/cfns.h $SRCDIR/patch-gcc-cfns.diff
+    do_patch $WORKDIR/$GCC/gcc/cp/cfns.gperf $SRCDIR/patch-gcc-cfns-gperf.diff
+	
 	echo "mkdir -p $BUILDDIR/$OBJ" >> $COMMAND_LOG
 	mkdir -p $BUILDDIR/$OBJ
 	pushd $BUILDDIR/$OBJ
@@ -249,6 +341,7 @@ gccstatic() {
 			--prefix=$TOOLCHAIN \
 			--with-gmp-include=$BUILDDIR/$OBJ/gmp \
 			--with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs \
+			--with-build-sysroot=$SYSROOT \
 			--without-headers \
 			--with-newlib \
 			--disable-shared \
@@ -285,15 +378,39 @@ gccstatic() {
         grep "Error" "$LOGDIR/$OBJ""_make.log"
         grep "Error" "$LOGDIR/$OBJ""_make_install.log"
         echo "\n"
-        failed_message
+        build_failed_message
     fi
-	popd
+	DONTCARE=popd
 }
 
 gccminimal() {
 	OBJ=$GCC-min
-	do_msg $OBJ "start"
 	check_done $OBJ && return 0
+	do_msg $OBJ "start"
+	
+	get_url "https://ftp.gnu.org/gnu/gcc/$GCC/$GCC.tar.bz2"
+    get_url "https://ftp.gnu.org/gnu/gmp/$GMP.tar.gz"	
+    get_url "https://ftp.gnu.org/gnu/mpfr/$MPFR.tar.gz"
+    get_url "https://gcc.gnu.org/pub/gcc/infrastructure/$MPC.tar.gz"
+    #get_url "https://osmocom.org/attachments/download/2798/patch-gcc46-texi.diff"
+	
+	unpack "$GCC.tar.bz2"
+    unpack "$GMP.tar.gz" "$WORKDIR/$GCC" "gmp"
+    unpack "$MPFR.tar.gz" "$WORKDIR/$GCC" "mpfr"
+    unpack "$MPC.tar.gz" "$WORKDIR/$GCC" "mpc"
+	
+	# Patching texinfo issues affecting gcc: https://osmocom.org/issues/1916
+    # Not really sure how the syntax gets fucked up in only a few places...
+    do_patch $WORKDIR/$GCC/gcc/doc/gcc.texi $SRCDIR/patch-gcc46-texi.diff
+    do_patch $WORKDIR/$GCC/gcc/doc/cppopts.texi $SRCDIR/patch-cppopts.texi.diff
+    do_patch $WORKDIR/$GCC/gcc/doc/invoke.texi $SRCDIR/patch-invoke-texi.diff
+    do_patch $WORKDIR/$GCC/gcc/doc/generic.texi $SRCDIR/patch-generic-texi.diff
+	# TODO: Unsure if these two should be patched or if installing gperf is the answer.
+    # patch-gcc-cfns-gperf.diff is necessary
+    # https://github.com/parallaxinc/propgcc/issues/79
+    do_patch $WORKDIR/$GCC/gcc/cp/cfns.h $SRCDIR/patch-gcc-cfns.diff
+    do_patch $WORKDIR/$GCC/gcc/cp/cfns.gperf $SRCDIR/patch-gcc-cfns-gperf.diff
+	
 	mkdir -p $BUILDDIR/$OBJ
 	pushd $BUILDDIR/$OBJ
 	if [ ! -f Makefile ]; then
@@ -316,13 +433,38 @@ gccminimal() {
 	make install 2>&1 | tee "$LOGDIR/$OBJ""_minimal_make_install.log" 
 	do_msg $OBJ "done"
 	touch $BUILDDIR/$OBJ.done
-	popd
+	DONTCARE=popd
 }
 
 gccfull() {
 	OBJ=$GCC
-	do_msg $OBJ "start"
 	check_done $OBJ && return 0
+	do_msg $OBJ "start"
+	
+	get_url "https://ftp.gnu.org/gnu/gcc/$GCC/$GCC.tar.bz2"
+    get_url "https://ftp.gnu.org/gnu/gmp/$GMP.tar.gz"	
+    get_url "https://ftp.gnu.org/gnu/mpfr/$MPFR.tar.gz"
+    get_url "https://gcc.gnu.org/pub/gcc/infrastructure/$MPC.tar.gz"
+    #get_url "https://osmocom.org/attachments/download/2798/patch-gcc46-texi.diff"
+	
+	unpack "$GCC.tar.bz2"
+    unpack "$GMP.tar.gz" "$WORKDIR/$GCC" "gmp"
+    unpack "$MPFR.tar.gz" "$WORKDIR/$GCC" "mpfr"
+    unpack "$MPC.tar.gz" "$WORKDIR/$GCC" "mpc"
+    
+	# Patching texinfo issues affecting gcc: https://osmocom.org/issues/1916
+    # Not really sure how the syntax gets fucked up in only a few places...
+    do_patch $WORKDIR/$GCC/gcc/doc/gcc.texi $SRCDIR/patch-gcc46-texi.diff
+    do_patch $WORKDIR/$GCC/gcc/doc/cppopts.texi $SRCDIR/patch-cppopts.texi.diff
+    do_patch $WORKDIR/$GCC/gcc/doc/invoke.texi $SRCDIR/patch-invoke-texi.diff
+    do_patch $WORKDIR/$GCC/gcc/doc/generic.texi $SRCDIR/patch-generic-texi.diff
+	# TODO: Unsure if these two should be patched or if installing gperf is the answer.
+    # patch-gcc-cfns-gperf.diff is necessary
+    # https://github.com/parallaxinc/propgcc/issues/79
+    do_patch $WORKDIR/$GCC/gcc/cp/cfns.h $SRCDIR/patch-gcc-cfns.diff
+    do_patch $WORKDIR/$GCC/gcc/cp/cfns.gperf $SRCDIR/patch-gcc-cfns-gperf.diff
+	
+	
 	mkdir -p $BUILDDIR/$OBJ
 	pushd $BUILDDIR/$OBJ
 	if [ ! -f Makefile ]; then
@@ -345,13 +487,18 @@ gccfull() {
 	make install 2>&1 | tee "$LOGDIR/$OBJ""_full_make_install.log" 
 	do_msg $OBJ "done"
 	touch $BUILDDIR/$OBJ.done
-	popd
+	DONTCARE=popd
 }
 
-kernelheader() { 
+kernelheader() {
 	OBJ=$KERNEL
 	check_done $OBJ && return 0
-	pushd $WORKDI   R/$OBJ
+	do_msg $OBJ "start"
+	
+	get_url "https://mirrors.edge.kernel.org/pub/linux/kernel/v2.6/$KERNEL.tar.bz2"
+	unpack "$KERNEL.tar.bz2"
+	
+	pushd $WORKDIR/$OBJ
 	do_msg $OBJ "Starting Linux header make"
 	echo "make mrproper" >> $COMMAND_LOG
 	make mrproper 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
@@ -368,18 +515,35 @@ kernelheader() {
 	do_msg $OBJ "done"
 	echo "touch $BUILDDIR/$OBJ.done" >> $COMMAND_LOG
 	touch $BUILDDIR/$OBJ.done
-	popd
+	DONTCARE=popd
 }
 
 glibcheader() {
 	OBJ=$GLIBC-header
-	do_msg $OBJ "start"
 	check_done $OBJ && return 0
+	do_msg $OBJ "start"
+	
+	get_url "https://ftp.gnu.org/gnu/libc//$GLIBC.tar.gz"
+    get_url "https://ftp.gnu.org/gnu/libc/$GLIBCPORTS.tar.gz"
+    #get_url "www.linuxfromscratch.org/patches/downloads/glibc/glibc-2.11.1-gcc_fix-1.patch"
+	
+	unpack "$GLIBC.tar.gz"
+    unpack "$GLIBCPORTS.tar.gz" "$WORKDIR/$GLIBC" "ports"
+	
+	# Some patches modified and taken from: http://www.linuxfromscratch.org/patches/downloads/glibc/
+    do_patch $WORKDIR/$GLIBC/manual/Makefile $SRCDIR/patch-glibc-Makefile.diff
+    # hsep and vsep not supported by most versions of texinfo: http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080975.html
+    do_patch $WORKDIR/$GLIBC/manual/stdio.texi $SRCDIR/patch-glibc-stdio-texi.diff
+    do_patch $WORKDIR/$GLIBC/nptl/sysdeps/pthread/pt-initfini.c $SRCDIR/patch-glibc-pt-initfini-c.diff
+    do_patch $WORKDIR/$GLIBC/sysdeps/unix/sysv/linux/i386/sysdep.h $SRCDIR/patch-glibc-sysdep-h.diff
+    # Patching configure because we're from the future.
+    do_patch $WORKDIR/$GLIBC/configure $SRCDIR/patch-glibc-configure.diff
+	
 	mkdir -p $BUILDDIR/$OBJ
 	pushd $BUILDDIR/$OBJ
 	if [ ! -f Makefile ]; then
 	
-	echo "BUILD_CC=gcc CC=$TOOLCHAIN/bin/$TARGET-gcc CXX=$TOOLCHAIN/bin/$TARGET-g++ AR=$TOOLCHAIN/bin/$TARGET-ar LD=$TOOLCHAIN/bin/$TARGET-ld RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib $WORKDIR/$GLIBC/configure --prefix=/usr --with-headers=$SYSROOT/usr/include --build=$BUILD --host=$TARGET --disable-nls --disable-profile --without-gd --without-cvs --enable-add-ons=nptl,ports libc_cv_forced_unwind=yes libc_cv_c_cleanup=yes" >> $COMMAND_LOG
+	    echo "BUILD_CC=gcc CC=$TOOLCHAIN/bin/$TARGET-gcc CXX=$TOOLCHAIN/bin/$TARGET-g++ AR=$TOOLCHAIN/bin/$TARGET-ar LD=$TOOLCHAIN/bin/$TARGET-ld RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib $WORKDIR/$GLIBC/configure --prefix=/usr --with-headers=$SYSROOT/usr/include --build=$BUILD --host=$TARGET --disable-nls --disable-profile --without-gd --without-cvs --enable-add-ons=nptl,ports libc_cv_forced_unwind=yes libc_cv_c_cleanup=yes" >> $COMMAND_LOG
 	
 		BUILD_CC=gcc \
 		CC=$TOOLCHAIN/bin/$TARGET-gcc \
@@ -398,9 +562,12 @@ glibcheader() {
 			--without-cvs \
 			--enable-shared \
 			--enable-add-ons=nptl,ports \
+			--enable-kernel=$(echo $KERNEL | cut -d "-" -f2) \
+			--with-binutils=$TOOLCHAIN/$TARGET/bin \
 			libc_cv_forced_unwind=yes \
             libc_cv_c_cleanup=yes 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
 	fi
+	
 	do_msg $OBJ "install"
 	make \
 		install-headers \
@@ -419,21 +586,40 @@ glibcheader() {
 		-o $SYSROOT/usr/lib/libc.so 2>&1 | tee "$LOGDIR/$OBJ""_dummy_libc.log"
 	do_msg $OBJ "done"
 	touch $BUILDDIR/$OBJ.done
-	popd
+	DONTCARE=popd
 }
 
 glibc() {
 	OBJ=$GLIBC
-	do_msg $OBJ "start"
 	check_done $OBJ && return 0
+	do_msg $OBJ "start"
+	
+	get_url "https://ftp.gnu.org/gnu/libc//$GLIBC.tar.gz"
+    get_url "https://ftp.gnu.org/gnu/libc/$GLIBCPORTS.tar.gz"
+    #get_url "www.linuxfromscratch.org/patches/downloads/glibc/glibc-2.11.1-gcc_fix-1.patch"
+	
+	unpack "$GLIBC.tar.gz"
+    unpack "$GLIBCPORTS.tar.gz" "$WORKDIR/$GLIBC" "ports"
+	
+	# Some patches modified and taken from: http://www.linuxfromscratch.org/patches/downloads/glibc/
+    do_patch $WORKDIR/$GLIBC/manual/Makefile $SRCDIR/patch-glibc-Makefile.diff
+    # hsep and vsep not supported by most versions of texinfo: http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080975.html
+    do_patch $WORKDIR/$GLIBC/manual/stdio.texi $SRCDIR/patch-glibc-stdio-texi.diff
+    do_patch $WORKDIR/$GLIBC/nptl/sysdeps/pthread/pt-initfini.c $SRCDIR/patch-glibc-pt-initfini-c.diff
+    do_patch $WORKDIR/$GLIBC/sysdeps/unix/sysv/linux/i386/sysdep.h $SRCDIR/patch-glibc-sysdep-h.diff
+    # Patching configure because we're from the future.
+    do_patch $WORKDIR/$GLIBC/configure $SRCDIR/patch-glibc-configure.diff
+	
 	mkdir -p $BUILDDIR/$OBJ
-	pushd  $BUILDDIR/$OBJ
+	pushd $BUILDDIR/$OBJ
 	if [ ! -f Makefile ]; then
+	
 	    BUILD_CC=gcc \
-	    CC=$TOOLCHAIN/bin/$TARGET-gcc \
-	    CXX=$TOOLCHAIN/bin/$TARGET-g++ \
-        AR=$TOOLCHAIN/bin/$TARGET-ar \
-        RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib \
+		CC=$TOOLCHAIN/bin/$TARGET-gcc \
+		CXX=$TOOLCHAIN/bin/$TARGET-g++ \
+		AR=$TOOLCHAIN/bin/$TARGET-ar \
+		LD=$TOOLCHAIN/bin/$TARGET-ld \
+		RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib \
 		$WORKDIR/$GLIBC/configure \
 		--prefix=/usr \
 		--with-headers=$SYSROOT/usr/include \
@@ -446,6 +632,7 @@ glibc() {
         --enable-add-ons=nptl,ports\
         --enable-shared \
         --enable-kernel=$(echo $KERNEL | cut -d "-" -f2) \
+        --with-binutils=$TOOLCHAIN/$TARGET/bin \
         libc_cv_forced_unwind=yes \
         libc_cv_c_cleanup=yes
 	fi
@@ -457,30 +644,132 @@ glibc() {
 	make install install_root=$SYSROOT 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log"
 	do_msg $OBJ "done"
 	touch $BUILDDIR/$OBJ.done
-	popd
+	DONTCARE=popd
 }
 
+
+
+######################################
+#### PARSE COMMAND LINE ARGUMENTS ####
+######################################
+while [[ $# -gt 0 ]]
+do
+    key="$1"
+    case $key in
+        -b|--base-dir)
+            BASEDIR=$2
+            shift # past argument
+            shift # past value
+        ;;
+        --binutils)
+            FORCE_BUILD_BINUTILS=true
+            shift # past argument
+        ;;
+        --gcc-static)
+            FORCE_BUILD_GCCSTATIC=true
+            shift # past argument
+        ;;
+        --kernel-headers)
+            FORCE_BUILD_KERNEL_HEADERS=true
+            shift # past argument
+        ;;
+        --glibc)
+            FORCE_BUILD_GLIBC=true
+            echo "FORCE BUILD GLIBC $FORCE_BUILD_GLIBC"
+            shift # past argument
+        ;;
+        --glibc-headers)
+            FORCE_BUILD_GLIBC_HEADERS=true
+            shift # past argument
+        ;;
+        --glibc)
+            FORCE_BUILD_GLIBC=true
+            shift # past argument
+        ;;
+        --gcc-minimal)
+            FORCE_BUILD_GCCMINIMAL=true
+            shift # past argument
+        ;;
+        --gcc-full)
+            FORCE_BUILD_GCCFULL=true
+            shift # past argument
+        ;;
+        
+        -r|-rb|--restart-build)
+            RESTART_BUILD=true
+            shift # past argument
+        ;;
+        -rt|--restart-toolchain)
+            RESTART_TOOLCHAIN=true
+            shift # past argument
+        ;;
+        -ra|--restart-all)
+            RESTART_ALL=true
+            shift # past argument
+        ;;
+        -c|--clean)
+            CLEAN=true
+            shift # past argument
+        ;;
+        *)    # unknown option
+            POSITIONAL+=("$1") # save it in an array for later
+            shift # past argument
+        ;;
+    esac
+done
+
+# Set the global values for all directory variables.
+set_base_directory
+
+# After this point, the log dir should exist, so we can start logging things.
+initialize_command_log
+
+
+
+########################################
+#### EXECUTE COMMAND LINE ARGUMENTS ####
+########################################
+# Process command line arguments that clean things up.
+if [ "$RESTART_BUILD" = true ]; then
+    do_msg "Command Line Argument (--restart-build)" "Removing work and build dirs, and restarting build with existing toolchain..." "WARN"
+    remove_dir $BUILDDIR
+    remove_dir $WORKDIR
+    
+elif [ "$RESTART_TOOLCHAIN" = true ]; then
+    do_msg "Command Line Argument (--restart-toolchain)" "Removing all dirs except src, and restarting whole toolchain build..." "WARN"
+    remove_dir $BUILDDIR
+    remove_dir $WORKDIR
+    remove_dir $TOOLCHAIN
+    remove_dir $SYSROOT
+    
+elif [ "$RESTART_ALL" = true ]; then
+    do_msg "Command Line Argument (--restart-all)" "Removing everything, re-downloading source, and restarting whole toolchain build ..." "WARN"
+    remove_dir $BUILDDIR
+    remove_dir $WORKDIR
+    remove_dir $TOOLCHAIN
+    remove_dir $SYSROOT
+    remove_dir $SRCDIR
+    remove_dir $LOGDIR
+    
+elif [ "$CLEAN" = true ]; then
+    do_msg "Command Line Argument (--clean)" "Removing everything and exiting..." "WARN"
+    remove_dir $BUILDDIR
+    remove_dir $WORKDIR
+    remove_dir $TOOLCHAIN
+    remove_dir $SYSROOT
+    remove_dir $SRCDIR
+    remove_dir $LOGDIR
+    exit 1
+fi
+
+# Process command line arguments that determine what gets built.
 
 
 ####################
 #### SETUP TIME ####
 ####################
-
-mkdir -p $LOGDIR
-COMMAND_LOG="$LOGDIR/command.log"
-echo "" > $COMMAND_LOG
-
+# Asks you to change your default shell from dash to bash.
 set_default_shell
-
-
-for arg in "$@"
-do
-    if [ "$arg" == "--help" ] || [ "$arg" == "-h" ]
-    then
-        echo "Help argument detected."
-    fi
-done
-
 
 # Install missing packages. (Not yet sure if we need libelf-dev)
 install_missing_package "build-essential"
@@ -489,111 +778,71 @@ install_missing_package "autoconf"
 install_missing_package "gperf"
 #install_missing_package "libelf-dev"
 
-# Remove existing, contaminated directories.
-echo -e "$STAT Removing any existing build or work dirs..."
-echo "rm -rf $BUILDDIR" >> $COMMAND_LOG
-rm -rf $BUILDDIR
-#echo "rm -rf $WORKDIR" >> $COMMAND_LOG
-#rm -rf $WORKDIR
-echo "rm -f $LOGDIR/*" >> $COMMAND_LOG
-rm -f $LOGDIR/*
-
-# Create necessary directories to work with.
+# Create necessary directories to work with, if they don't already exist.
 make_dir $SYSROOT
 make_dir $TOOLCHAIN
 make_dir $SRCDIR
 make_dir $WORKDIR
 make_dir $BUILDDIR
 
-
-
-#######################
-#### DOWNLOAD TIME ####
-#######################
-
-# Download fresh source files from the internet.
-echo -e "$STAT Downloading source files..."
-pushd $SRCDIR
-get_url "https://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2"
-get_url "https://ftp.gnu.org/gnu/gcc/$GCC/$GCC.tar.bz2"
-#get_url "https://osmocom.org/attachments/download/2798/patch-gcc46-texi.diff"
-get_url "https://mirrors.edge.kernel.org/pub/linux/kernel/v2.6/$KERNEL.tar.bz2"
-get_url "https://ftp.gnu.org/gnu/gmp/$GMP.tar.gz"	
-get_url "https://ftp.gnu.org/gnu/mpfr/$MPFR.tar.gz"
-get_url "https://gcc.gnu.org/pub/gcc/infrastructure/$MPC.tar.gz"
-get_url "https://ftp.gnu.org/gnu/libc//$GLIBC.tar.gz"
-get_url "https://ftp.gnu.org/gnu/libc/$GLIBCPORTS.tar.gz"
-#get_url "www.linuxfromscratch.org/patches/downloads/glibc/glibc-2.11.1-gcc_fix-1.patch"
-
-
-
-########################
-#### UNZIP TIME UwU ####
-########################
-
-# Unpack binutils and gcc
-unpack "$BINUTILS.tar.bz2"
-unpack "$GCC.tar.bz2"
-unpack "$KERNEL.tar.bz2"
-unpack "$GLIBC.tar.gz"
-unpack "$GMP.tar.gz" "$WORKDIR/$GCC" "gmp"
-unpack "$MPFR.tar.gz" "$WORKDIR/$GCC" "mpfr"
-unpack "$MPC.tar.gz" "$WORKDIR/$GCC" "mpc"
-unpack "$GLIBCPORTS.tar.gz" "$WORKDIR/$GLIBC" "ports"
-
-
-
-####################
-#### PATCH TIME ####
-####################
-# Some of these patches are totally understandable - it's been a decade since this version
-# of gcc was released (4.5.1). Other patches have me all "How in the fuck did this happen?".
-# Like, comment, and subscribe if you agree.
-# 
-# Patching texinfo issues affecting gcc: https://osmocom.org/issues/1916
-# Not really sure how the syntax gets fucked up in only a few places...
-do_patch $WORKDIR/$GCC/gcc/doc/gcc.texi $SRCDIR/patch-gcc46-texi.diff
-do_patch $WORKDIR/$GCC/gcc/doc/cppopts.texi $SRCDIR/patch-cppopts.texi.diff
-do_patch $WORKDIR/$GCC/gcc/doc/invoke.texi $SRCDIR/patch-invoke-texi.diff
-do_patch $WORKDIR/$GCC/gcc/doc/generic.texi $SRCDIR/patch-generic-texi.diff
-
-# TODO: Unsure if these two should be patched or if installing gperf is the answer.
-# patch-gcc-cfns-gperf.diff is necessary
-# https://github.com/parallaxinc/propgcc/issues/79
-do_patch $WORKDIR/$GCC/gcc/cp/cfns.h $SRCDIR/patch-gcc-cfns.diff
-do_patch $WORKDIR/$GCC/gcc/cp/cfns.gperf $SRCDIR/patch-gcc-cfns-gperf.diff
-
-
-# Apply some patches because we're dirty futurers.
-# Some patches modified and taken from: http://www.linuxfromscratch.org/patches/downloads/glibc/
-do_patch $WORKDIR/$GLIBC/manual/Makefile $SRCDIR/patch-glibc-Makefile.diff
-do_patch $WORKDIR/$GLIBC/nptl/sysdeps/pthread/pt-initfini.c $SRCDIR/patch-glibc-pt-initfini-c.diff
-do_patch $WORKDIR/$GLIBC/sysdeps/unix/sysv/linux/i386/sysdep.h $SRCDIR/patch-glibc-sysdep-h.diff
-# Patching configure because we're from the future.
-do_patch $WORKDIR/$GLIBC/configure $SRCDIR/patch-glibc-configure.diff
-
-
 ####################
 #### BUILD TIME ####
 ####################
 
-# Compile binutils.
-#echo "[*] Compiling $BINUTILS..."
-binutils
+if [ "$FORCE_BUILD_BINUTILS" == true ] || [ "$FORCE_BUILD_GCCSTATIC" == true ] || [ "$FORCE_BUILD_KERNEL_HEADERS" == true ] || [ "$FORCE_BUILD_GLIBC_HEADERS" == true ] || [ "$FORCE_BUILD_GLIBC" == true ] || [ "$FORCE_BUILD_GCCMINIMAL" == true ] || [ "$FORCE_BUILD_GCCFULL" == true ]; then
+    if [ "$FORCE_BUILD_BINUTILS" == true ]; then
+        remove_dir "$WORKDIR/$BINUTILS"
+        remove_dir "$BUILDDIR/$BINUTILS"
+        rm -f "$BUILDDIR/$BINUTILS.done"
+        binutils  
+    fi
+    if [ "$FORCE_BUILD_GCCSTATIC" == true ]; then
+        remove_dir "$WORKDIR/$GCC"
+        remove_dir "$BUILDDIR/$GCC-static"
+        rm -f "$BUILDDIR/$GCC-static.done"
+        gccstatic
+    fi
+    if [ "$FORCE_BUILD_KERNEL_HEADERS" == true ]; then
+        remove_dir "$WORKDIR/$KERNEL"
+        rm -f "$BUILDDIR/$KERNEL.done"
+        kernelheader
+    fi
+    if [ "$FORCE_BUILD_GLIBC_HEADERS" == true ]; then
+        remove_dir "$WORKDIR/$GLIBC"
+        remove_dir "$BUILDDIR/$GLIBC-header"
+        rm -f "$BUILDDIR/$GLIBC-header.done"
+        glibcheader
+    fi
+    if [ "$FORCE_BUILD_GLIBC" == true ]; then
+        remove_dir "$WORKDIR/$GLIBC"
+        remove_dir "$BUILDDIR/$GLIBC"
+        rm -f "$BUILDDIR/$GLIBC.done"
+        glibc
+    fi
+    if [ "$FORCE_BUILD_GCCMINIMAL" == true ]; then
+        remove_dir "$WORKDIR/$GCC"
+        remove_dir "$BUILDDIR/$GCC-min"
+        rm -f "$BUILDDIR/$GCC-min.done"
+        gccminimal
+    fi
+    if [ "$FORCE_BUILD_GCCFULL" == true ]; then
+        remove_dir "$WORKDIR/$GCC"
+        remove_dir "$BUILDDIR/$GCC"
+        rm -f "$BUILDDIR/$GCC.done"
+        gccfull
+    fi
+else
+    binutils
+    gccstatic
+    kernelheader
+    glibcheader
+    glibc
+    gccminimal
+    gccfull
+fi
 
-# Compile the static gcc, and create libgcc_eh.a as a link to libgcc.a
-# Because http://www.linuxfromscratch.org/lfs/view/6.7/chapter05/gcc-pass1.html told us to.
-# TODO: there may be an issue with where this symbolic link is placed and what path is in PATH
-gccstatic
+build_success_message
 
-# Compile the kernel headers.
-kernelheader
 
-# Compile the glibc headers (I have no idea what I'm doing).
-glibcheader
-
-glibc
-gccminimal
-gccfull
-
-success_message
+grep -v -n "warning:" logs/* | grep -B4 "Error"
+#grep -n -v "warning:" logs/glibc-2.11.1_make_install.log | less
