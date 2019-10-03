@@ -626,7 +626,7 @@ glibc() {
 	AR=$TOOLCHAIN/bin/$TARGET-ar \
 	LD=$TOOLCHAIN/bin/$TARGET-ld \
 	RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib \
-	CFLAGS="-g -Wall -I$SYSROOT/usr/include -I$BUILDDIR/$GLIBC-header -I$WORKDIR/$GLIBC/include -L$SYSROOT/lib -L$SYSROOT/usr/lib -L$BUILDDIR/$GLIBC-header/csu -I$BUILDDIR/$GLIBC-header/csu" \
+	CFLAGS="-O2 -g -Wall -I$SYSROOT/usr/include -I$BUILDDIR/$GLIBC-header -I$WORKDIR/$GLIBC/include -L$SYSROOT/lib -L$SYSROOT/usr/lib -L$BUILDDIR/$GLIBC-header/csu -I$BUILDDIR/$GLIBC-header/csu" \
 	$WORKDIR/$GLIBC/configure \
 	    --prefix=$SYSROOT/usr \
 		--with-headers=$SYSROOT/usr/include \
@@ -636,7 +636,6 @@ glibc() {
 		--disable-profile \
 		--without-gd \
 		--without-cvs \
-		--enable-shared \
 		--enable-add-ons=nptl,ports \
 		--enable-kernel=$(echo $KERNEL | cut -d "-" -f2) \
 		--with-binutils=$TOOLCHAIN/$TARGET/bin \
@@ -965,4 +964,4 @@ build_success_message
 
 
 grep -v -n "warning:" logs/* | grep -B4 "Error"
-#grep -n -v "warning:" logs/glibc-2.11.1_make_install.log | less`
+#grep -n -v "warning:" logs/glibc-2.11.1_make_install.log | less
