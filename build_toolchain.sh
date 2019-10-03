@@ -48,6 +48,12 @@ FORCE_BUILD_GLIBC_HEADERS=false  # Whether this is a partial build, rebuilding g
 FORCE_BUILD_GCCMINIMAL=false    # Whether this is a partial build, rebuilding gcc-minimal.
 FORCE_BUILD_GCCFULL=false       # Whether this is a partial build, rebuilding gcc-full.
 
+
+
+##########################
+#### HELPER FUNCTIONS ####
+##########################
+
 initialize_command_log(){
     mkdir -p $LOGDIR
     rm -f $LOGDIR/*
@@ -108,6 +114,7 @@ build_success_message(){
 }
 
 build_failed_message(){
+    object_name=${1:-""}
     echo -e "$RED"
     echo " _____       _  _           _ "
     echo "| ____| ___ |_|| | ___   __| |"
@@ -116,6 +123,13 @@ build_failed_message(){
     echo "|_|    \__|_|_||_|\___| \__,_|"
     echo "                              "
     echo -e "$END"
+    
+    if [ "$object_name" != "" ]; then
+        echo -e "$BAD$RED Grep'd errors from log files:$END\n"
+        grep "Error" "$LOGDIR/$object_name""_make.log"
+        grep "Error" "$LOGDIR/$object_name""_make_install.log"
+        echo "\n"
+    fi
     exit 1
 }
 
@@ -164,10 +178,14 @@ install_missing_package() {
 # Makes directories for the supplied path, including parents, and logs the operation to the command log. 
 make_dir() {
     dir_path=$1
+    change_to_dir=${2:-false}
     if [ ! -d "$dir_path" ]; then
         echo "mkdir -p $dir_path" >> $COMMAND_LOG
         mkdir -p $dir_path
     fi
+    if [ "$change_to_dir" = true ]; then
+        change_dir $dir_path
+    fi 
 }
 
 # Removes directories at the supplied path and logs the operation to the command log. 
@@ -176,6 +194,29 @@ remove_dir() {
     if [ -d "$dir_path" ]; then
         echo "rm -rf $dir_path" >> $COMMAND_LOG
         rm -rf $dir_path
+    fi
+}
+
+remove_file() {
+    file_path=$1
+    echo "rm -f $file_path" >> $COMMAND_LOG
+    rm -f $file_path
+}
+
+change_dir() {
+    dir_path=${1:-$BASEDIR}
+    if [ -d "$dir_path" ]; then
+        echo "cd $dir_path" >> $COMMAND_LOG
+        cd $dir_path
+    else
+        echo -e "$BAD ERROR while changing directories: supplied path does not exist: $dir_path"
+        echo -e "$BAD Unalbe to continue - exiting..."
+        exit 1
+    fi
+    if [ "`pwd`" != "$dir_path" ]; then
+        echo -e "$BAD ERROR: Failed to change directories to supplied path: $dir_path"
+        echo -e "$BAD Unalbe to continue - exiting..."
+        exit 1
     fi
 }
 
@@ -248,7 +289,7 @@ check_done() {
 	return 1
 }
 
-# Original function that
+# Prints formatted message and writes it to the command log (as a comment).
 do_msg() {
 	OBJECT=$1
 	ACTION=$2
@@ -270,6 +311,12 @@ do_msg() {
     esac	
 }
 
+
+
+#######################
+### BUILD FUNCTIONS ###
+#######################
+
 binutils() {
 	OBJ=$BINUTILS
 	check_done $OBJ && return 0
@@ -278,29 +325,45 @@ binutils() {
 	get_url "https://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2"
 	unpack "$BINUTILS.tar.bz2"
 	
-	echo "mkdir -p $BUILDDIR/$OBJ" >> $COMMAND_LOG
-	mkdir -p $BUILDDIR/$OBJ
-	pushd $BUILDDIR/$OBJ
-	if [ ! -f Makefile ]; then
-	    echo "$WORKDIR/$OBJ/configure --target=$TARGET --prefix=$TOOLCHAIN --with-sysroot=$SYSROOT --disable-nls --disable-werror" >> $COMMAND_LOG
-	    
-		$WORKDIR/$OBJ/configure \
-			--target=$TARGET \
-			--prefix=$TOOLCHAIN \
-			--with-sysroot=$SYSROOT \
-			--disable-nls \
-			--disable-werror
-	fi
-	do_msg $OBJ "do     make"
+	make_dir $BUILDDIR/$OBJ true
+	remove_file "Makefile"
+	
+    echo "$WORKDIR/$OBJ/configure --target=$TARGET --prefix=$TOOLCHAIN --with-sysroot=$SYSROOT --disable-nls --disable-werror" >> $COMMAND_LOG
+    
+	$WORKDIR/$OBJ/configure \
+		--target=$TARGET \
+		--prefix=$TOOLCHAIN \
+		--with-sysroot=$SYSROOT \
+		--disable-nls \
+		--disable-werror
+	
+	do_msg $OBJ "do make"
 	echo "make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
 	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
+	
+	case $(uname -m) in
+        x86_64)
+            echo "ln -sv $TOOLCHAIN/lib $TOOLCHAIN/lib64" >> $COMMAND_LOG
+            ln -sv $TOOLCHAIN/lib $TOOLCHAIN/lib64
+            #echo "ln -sv $TOOLCHAIN/$TARGET/lib $TOOLCHAIN/$TARGET/lib64" >> $COMMAND_LOG
+            #ln -sv $TOOLCHAIN/$TARGET/lib $TOOLCHAIN/$TARGET/lib64
+        ;;
+    esac
+	
 	do_msg $OBJ "do make install to $TOOLCHAIN/$TARGET"
 	echo "make all install 2>&1 | tee $LOGDIR/$OBJ""_make_all_install.log" >> $COMMAND_LOG
 	make all install 2>&1 | tee "$LOGDIR/$OBJ""_make_all_install.log" 
-	do_msg $OBJ "done"
-	echo "touch $BUILDDIR/$OBJ.done" >> $COMMAND_LOG
-	touch $BUILDDIR/$OBJ.done
-	DONTCARE=popd
+	
+	if [ -f $TOOLCHAIN/bin/$TARGET-ld ] && [ -f $TOOLCHAIN/bin/$TARGET-as ] && [ -f $TOOLCHAIN/bin/$TARGET-nm ] && [ -f $TOOLCHAIN/bin/$TARGET-ar ] && [ -f $TOOLCHAIN/bin/$TARGET-readelf ] && [ -f $TOOLCHAIN/bin/$TARGET-objdump ] && [ -f $TOOLCHAIN/$TARGET/bin/ar ] && [ -f $TOOLCHAIN/$TARGET/bin/as ] && [ -f $TOOLCHAIN/$TARGET/bin/ld ] && [ -f $TOOLCHAIN/$TARGET/bin/nm ] && [ -f $TOOLCHAIN/$TARGET/bin/objcopy ] && [ -f $TOOLCHAIN/$TARGET/bin/objdump ] && [ -f $TOOLCHAIN/$TARGET/bin/ranlib ] && [ -f $TOOLCHAIN/$TARGET/bin/strip ]; then
+        do_msg $OBJ "Done" "GOOD"
+	    echo "touch $BUILDDIR/$OBJ.done" >> $COMMAND_LOG
+    	touch $BUILDDIR/$OBJ.done
+    	change_dir
+	else
+	    do_msg $OBJ "ERROR: could not find desired build artifacts. Unsure if make/install worked. Exiting..." "BAD"
+        change_dir
+	    build_failed_message
+    fi
 }
 
 gccstatic() {
@@ -331,57 +394,268 @@ gccstatic() {
     do_patch $WORKDIR/$GCC/gcc/cp/cfns.h $SRCDIR/patch-gcc-cfns.diff
     do_patch $WORKDIR/$GCC/gcc/cp/cfns.gperf $SRCDIR/patch-gcc-cfns-gperf.diff
 	
-	echo "mkdir -p $BUILDDIR/$OBJ" >> $COMMAND_LOG
-	mkdir -p $BUILDDIR/$OBJ
-	pushd $BUILDDIR/$OBJ
-	if [ ! -f Makefile ]; then
-	    echo "$WORKDIR/$GCC/configure --target=$TARGET --prefix=$TOOLCHAIN --with-gmp-includes=$BUILDDIR/$OBJ/gmp --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs --without-headers --with-newlib --disable-shared --disable-threads --disable-libssp --disable-libgomp --disable-libmudflap --disable-nls --disable-multilib --disable-decimal-float --enable-languages=c --without-ppl --without-cloog" >> $COMMAND_LOG
-		$WORKDIR/$GCC/configure \
-			--target=$TARGET \
-			--prefix=$TOOLCHAIN \
-			--with-gmp-include=$BUILDDIR/$OBJ/gmp \
-			--with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs \
-			--with-build-sysroot=$SYSROOT \
-			--without-headers \
-			--with-newlib \
-			--disable-shared \
-			--disable-threads \
-			--disable-libssp \
-			--disable-libgomp \
-			--disable-libmudflap \
-			--disable-nls \
-			--disable-multilib \
-			--disable-decimal-float \
-			--enable-languages=c \
-			--without-ppl \
-			--without-cloog 2>&1 | tee "$LOGDIR/$OBJ""_static_configure.log"
-	fi
+	make_dir $BUILDDIR/$OBJ true
+	remove_file "Makefile"
+	
+    echo "$WORKDIR/$GCC/configure --target=$TARGET --prefix=$TOOLCHAIN --with-gmp-includes=$BUILDDIR/$OBJ/gmp --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs --without-headers --with-newlib --disable-shared --disable-threads --disable-libssp --disable-libgomp --disable-libmudflap --disable-nls --disable-multilib --disable-decimal-float --enable-languages=c --without-ppl --without-cloog" >> $COMMAND_LOG
+    
+    $WORKDIR/$GCC/configure \
+	    --target=$TARGET \
+	    --prefix=$TOOLCHAIN \
+	    --without-headers \
+	    --with-newlib \
+	    --disable-shared \
+	    --disable-threads \
+	    --disable-libssp \
+	    --disable-libgomp \
+	    --disable-libmudflap \
+	    --disable-nls \
+	    --libexecdir=$TOOLCHAIN/lib \
+	    --with-gmp-include=$BUILDDIR/$OBJ/gmp \
+	    --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs \
+	    --enable-languages=c 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+    
+	#$WORKDIR/$GCC/configure \
+	#	--target=$TARGET \
+	#	--prefix=$TOOLCHAIN \
+	#	--without-headers \
+	#	--with-newlib \
+	#	--disable-shared \
+	#	--disable-threads \
+    #   --disable-libssp \		
+	#	--disable-libgomp \
+	#	--disable-libmudflap \
+	#	--disable-nls \
+	#	--libexecdir=$TOOLCHAIN/lib \
+	#	--with-local-prefix=$TOOLCHAIN \
+	#	--enable-languages=c \		
+	#	--with-build-sysroot=$SYSROOT \
+	#	--without-ppl \
+	#	--without-cloog 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+	
 	do_msg $OBJ "do make"
 	echo "PATH=$TOOLCHAIN/bin:$PATH make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
 	PATH=$TOOLCHAIN/bin:$PATH \
-	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_static_make.log"
+	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
+	
 	do_msg $OBJ "do make install to $TOOLCHAIN/$TARGET"
 	echo "PATH=$TOOLCHAIN/bin:$PATH make install 2>&1 | tee $LOGDIR/$OBJ""_make_install.log" >> $COMMAND_LOG
 	PATH=$TOOLCHAIN/bin:$PATH \
-	make install 2>&1 | tee "$LOGDIR/$OBJ""_make_static_install.log"
+	make install 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log"
 
-    if [ -f $TOOLCHAIN/lib/gcc/$TARGET/$(echo $GCC | cut -d "-" -f2)/libgcc.a ]; then
+    if [ -f $TOOLCHAIN/lib/gcc/$TARGET/$(echo $GCC | cut -d "-" -f2)/libgcc.a ] && [ -f $TOOLCHAIN/bin/$TARGET-cpp ] && [ -f $TOOLCHAIN/bin/$TARGET-gcc ]; then
         if [ ! -f `/$TOOLCHAIN/bin/$TARGET-gcc -print-libgcc-file-name | sed 's/libgcc/&_eh/'` ]; then
             ln -vs $TOOLCHAIN/lib/gcc/$TARGET/$(echo $GCC | cut -d "-" -f2)/libgcc.a `/$TOOLCHAIN/bin/$TARGET-gcc -print-libgcc-file-name | sed 's/libgcc/&_eh/'`
         fi
-        do_msg $OBJ "Successfully compiled"
+        do_msg $OBJ "Done" "GOOD"
     	echo "touch $BUILDDIR/$OBJ.done" >> $COMMAND_LOG
     	touch $BUILDDIR/$OBJ.done
+    	change_dir
     else
-        do_msg $OBJ "Failed to compile" "BAD"
+        do_msg $OBJ "ERROR: could not find desired build artifacts. Unsure if make/install worked. Exiting..." "BAD"
         echo -e "$BAD$RED Grep'd errors from log files:$END\n"
         grep "Error" "$LOGDIR/$OBJ""_make.log"
         grep "Error" "$LOGDIR/$OBJ""_make_install.log"
         echo "\n"
+        change_dir
         build_failed_message
     fi
-	DONTCARE=popd
 }
+
+kernelheader() {
+	OBJ=$KERNEL
+	check_done $OBJ && return 0
+	do_msg $OBJ "start"
+	
+	get_url "https://mirrors.edge.kernel.org/pub/linux/kernel/v2.6/$KERNEL.tar.bz2"
+	unpack "$KERNEL.tar.bz2"
+	
+	make_dir $BUILDDIR/$OBJ
+    change_dir $WORKDIR/$OBJ
+	
+	do_msg $OBJ "Starting Linux header make"
+	
+	echo "make mrproper 2>&1 | tee $LOGDIR/$OBJ""_make_mrproper.log" >> $COMMAND_LOG
+	make mrproper 2>&1 | tee "$LOGDIR/$OBJ""_make_mrproper.log"
+	
+	echo "make headers_check 2>&1 | tee $LOGDIR/$OBJ""_make_headers_check.log" >> $COMMAND_LOG
+	make headers_check 2>&1 | tee "$LOGDIR/$OBJ""_make_headers_check.log"
+	
+	do_msg $OBJ "Installing toolchain headers"
+	echo "PATH=$TOOLCHAIN/bin:$PATH make ARCH=$ARCH INSTALL_HDR_PATH=$SYSROOT/usr CROSS_COMPILE=$TARGET- headers_install" >> $COMMAND_LOG
+	
+	PATH=$TOOLCHAIN/bin:$PATH \
+	make \
+		ARCH=$ARCH \
+		INSTALL_HDR_PATH=$SYSROOT/usr \
+		CROSS_COMPILE=$TARGET- \
+		headers_install 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log"
+	
+	echo "cp -r $SYSROOT/usr/* $TOOLCHAIN/" >> $COMMAND_LOG
+	cp -r $SYSROOT/usr/* $TOOLCHAIN/
+	
+	if [ -d $TOOLCHAIN/include/asm ] && [ -d $TOOLCHAIN/include/asm-generic ] && [ -d $TOOLCHAIN/include/linux ]; then
+        do_msg $OBJ "Done" "GOOD"
+	    echo "touch $BUILDDIR/$OBJ.done" >> $COMMAND_LOG
+    	touch $BUILDDIR/$OBJ.done
+    	change_dir
+	else
+	    do_msg $OBJ "ERROR: could not find desired build artifacts. Unsure if make/install worked. Exiting..." "BAD"
+        change_dir
+	    build_failed_message
+    fi
+}
+
+glibcheader() {
+	OBJ=$GLIBC-header
+	check_done $OBJ && return 0
+	do_msg $OBJ "start"
+	
+	get_url "https://ftp.gnu.org/gnu/libc//$GLIBC.tar.gz"
+    get_url "https://ftp.gnu.org/gnu/libc/$GLIBCPORTS.tar.gz"
+    #get_url "www.linuxfromscratch.org/patches/downloads/glibc/glibc-2.11.1-gcc_fix-1.patch"
+	
+	unpack "$GLIBC.tar.gz"
+    unpack "$GLIBCPORTS.tar.gz" "$WORKDIR/$GLIBC" "ports"
+	
+	# Some patches modified and taken from: http://www.linuxfromscratch.org/patches/downloads/glibc/
+    do_patch $WORKDIR/$GLIBC/manual/Makefile $SRCDIR/patch-glibc-Makefile.diff
+    # hsep and vsep not supported by most versions of texinfo: http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080975.html
+    do_patch $WORKDIR/$GLIBC/manual/stdio.texi $SRCDIR/patch-glibc-stdio-texi.diff
+    do_patch $WORKDIR/$GLIBC/nptl/sysdeps/pthread/pt-initfini.c $SRCDIR/patch-glibc-pt-initfini-c.diff
+    do_patch $WORKDIR/$GLIBC/sysdeps/unix/sysv/linux/i386/sysdep.h $SRCDIR/patch-glibc-sysdep-h.diff
+    # Patching configure because we're from the future.
+    do_patch $WORKDIR/$GLIBC/configure $SRCDIR/patch-glibc-configure.diff
+    do_patch $WORKDIR/$GLIBC/elf/ldd.bash.in $SRCDIR/patch-glibc-ldd-bash-in.diff
+	
+	#sed -i "s|libs -o|libs -L$SYSROOT/lib -Wl,-dynamic-linker=ld-linux.so.3 -o|" $WORKDIR/$GLIBC/scripts/test-installation.pl
+	
+	make_dir $BUILDDIR/$OBJ true
+	remove_file "Makefile"
+		
+    echo "BUILD_CC=gcc CC=$TOOLCHAIN/bin/$TARGET-gcc CXX=$TOOLCHAIN/bin/$TARGET-g++ AR=$TOOLCHAIN/bin/$TARGET-ar LD=$TOOLCHAIN/bin/$TARGET-ld RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib $WORKDIR/$GLIBC/configure --prefix=/usr --with-headers=$SYSROOT/usr/include --build=$BUILD --host=$TARGET --disable-nls --disable-profile --without-gd --without-cvs --enable-add-ons=nptl,ports libc_cv_forced_unwind=yes libc_cv_c_cleanup=yes" >> $COMMAND_LOG
+
+	BUILD_CC=gcc \
+	CC=$TOOLCHAIN/bin/$TARGET-gcc \
+	CXX=$TOOLCHAIN/bin/$TARGET-g++ \
+	AR=$TOOLCHAIN/bin/$TARGET-ar \
+	LD=$TOOLCHAIN/bin/$TARGET-ld \
+	RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib \
+	$WORKDIR/$GLIBC/configure \
+		--prefix=$SYSROOT/usr \
+		--with-headers=$SYSROOT/usr/include \
+		--build=$BUILD \
+		--host=$TARGET \
+		--disable-nls \
+		--disable-profile \
+		--without-gd \
+		--without-cvs \
+		--enable-shared \
+		--enable-add-ons=nptl,ports \
+		--enable-kernel=$(echo $KERNEL | cut -d "-" -f2) \
+		--with-binutils=$TOOLCHAIN/$TARGET/bin \
+		libc_cv_forced_unwind=yes \
+        libc_cv_c_cleanup=yes 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+	
+	do_msg $OBJ "install"
+	make \
+		install-headers \
+		install_root=$SYSROOT \
+		install-bootstrap-headers=yes 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log"
+	
+	do_msg $OBJ "Make csu lib."
+	make csu/subdir_lib 2>&1 | tee "$LOGDIR/$OBJ""_make_csu_lib.log"
+	mkdir -p $SYSROOT/usr/lib
+	cp csu/crt1.o csu/crti.o csu/crtn.o $SYSROOT/usr/lib
+	
+	$TOOLCHAIN/bin/$TARGET-gcc \
+		-nostdlib \
+		-nostartfiles \
+		-shared \
+		-x c /dev/null \
+		-o $SYSROOT/usr/lib/libc.so 2>&1 | tee "$LOGDIR/$OBJ""_gcc.log"
+	
+	if [ -f $SYSROOT/usr/lib/libc.so ] && [ -f $SYSROOT/usr/lib/crt1.o ] && [ -f $SYSROOT/usr/lib/crti.o ] && [ -f $SYSROOT/usr/lib/crtn.o ] && [ -d $SYSROOT/usr/include/sys ]; then
+        do_msg $OBJ "Done" "GOOD"
+	    echo "touch $BUILDDIR/$OBJ.done" >> $COMMAND_LOG
+    	touch $BUILDDIR/$OBJ.done
+    	change_dir
+	else
+	    do_msg $OBJ "ERROR: could not find desired build artifacts. Unsure if make/install worked. Exiting..." "BAD"
+        change_dir
+	    build_failed_message
+    fi
+}
+
+glibc() {
+	OBJ=$GLIBC
+	check_done $OBJ && return 0
+	do_msg $OBJ "start"
+	
+	get_url "https://ftp.gnu.org/gnu/libc//$GLIBC.tar.gz"
+    get_url "https://ftp.gnu.org/gnu/libc/$GLIBCPORTS.tar.gz"
+    #get_url "www.linuxfromscratch.org/patches/downloads/glibc/glibc-2.11.1-gcc_fix-1.patch"
+	
+	unpack "$GLIBC.tar.gz"
+    unpack "$GLIBCPORTS.tar.gz" "$WORKDIR/$GLIBC" "ports"
+	
+	# Some patches modified and taken from: http://www.linuxfromscratch.org/patches/downloads/glibc/
+    do_patch $WORKDIR/$GLIBC/manual/Makefile $SRCDIR/patch-glibc-Makefile.diff
+    # hsep and vsep not supported by most versions of texinfo: http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080975.html
+    do_patch $WORKDIR/$GLIBC/manual/stdio.texi $SRCDIR/patch-glibc-stdio-texi.diff
+    do_patch $WORKDIR/$GLIBC/nptl/sysdeps/pthread/pt-initfini.c $SRCDIR/patch-glibc-pt-initfini-c.diff
+    do_patch $WORKDIR/$GLIBC/sysdeps/unix/sysv/linux/i386/sysdep.h $SRCDIR/patch-glibc-sysdep-h.diff
+    # Patching configure because we're from the future.
+    do_patch $WORKDIR/$GLIBC/configure $SRCDIR/patch-glibc-configure.diff
+    do_patch $WORKDIR/$GLIBC/elf/ldd.bash.in $SRCDIR/patch-glibc-ldd-bash-in.diff
+	
+	#sed -i "s|libs -o|libs -L$SYSROOT/lib -Wl,-dynamic-linker=ld-linux.so.3 -o|" $WORKDIR/$GLIBC/scripts/test-installation.pl
+	
+	make_dir $BUILDDIR/$OBJ true
+	remove_file "Makefile"
+	
+    # --disable-nls \
+    # --without-cvs \
+    # --enable-shared \
+    #LIBS=$SYSROOT/lib:$SYSROOT/usr/lib \
+    #        libc_cv_forced_unwind=yes \
+    PATH=$TOOLCHAIN/lib/gcc/$TARGET/4.5.1/:$SYSROOT/usr/lib:$SYSROOT/usr/include:$TOOLCHAIN:$TOOLCHAIN/include:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin \
+    BUILD_CC=gcc \
+	CC=$TOOLCHAIN/bin/$TARGET-gcc \
+	CXX=$TOOLCHAIN/bin/$TARGET-g++ \
+	AR=$TOOLCHAIN/bin/$TARGET-ar \
+	LD=$TOOLCHAIN/bin/$TARGET-ld \
+	RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib \
+	CFLAGS="-g -Wall -I$SYSROOT/usr/include -I$BUILDDIR/$GLIBC-header -I$WORKDIR/$GLIBC/include -L$SYSROOT/lib -L$SYSROOT/usr/lib -L$BUILDDIR/$GLIBC-header/csu -I$BUILDDIR/$GLIBC-header/csu" \
+	$WORKDIR/$GLIBC/configure \
+	    --prefix=$SYSROOT/usr \
+		--with-headers=$SYSROOT/usr/include \
+		--build=$BUILD \
+		--host=$TARGET \
+		--disable-nls \
+		--disable-profile \
+		--without-gd \
+		--without-cvs \
+		--enable-shared \
+		--enable-add-ons=nptl,ports \
+		--enable-kernel=$(echo $KERNEL | cut -d "-" -f2) \
+		--with-binutils=$TOOLCHAIN/$TARGET/bin \
+		libc_cv_forced_unwind=yes \
+        libc_cv_c_cleanup=yes 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+	
+	do_msg $OBJ "compile"
+	PATH=$TOOLCHAIN/bin:$PATH \
+	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
+	
+	do_msg $OBJ "install"
+	PATH=$TOOLCHAIN/bin:$PATH \
+	make install install_root=$SYSROOT 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log"
+	
+	do_msg $OBJ "done"
+	touch $BUILDDIR/$OBJ.done
+	change_dir
+}
+
 
 gccminimal() {
 	OBJ=$GCC-min
@@ -411,29 +685,31 @@ gccminimal() {
     do_patch $WORKDIR/$GCC/gcc/cp/cfns.h $SRCDIR/patch-gcc-cfns.diff
     do_patch $WORKDIR/$GCC/gcc/cp/cfns.gperf $SRCDIR/patch-gcc-cfns-gperf.diff
 	
-	mkdir -p $BUILDDIR/$OBJ
-	pushd $BUILDDIR/$OBJ
-	if [ ! -f Makefile ]; then
-		$WORKDIR/$GCC/configure \
-			--target=$TARGET \
-			--prefix=$TOOLCHAIN \
-			--with-sysroot=$SYSROOT \
-			--disable-libssp \
-			--disable-libgomp \
-			--disable-libmudflap \
-			--disable-shared \
-			--disable-nls \
-			--enable-languages=c 2>&1 | tee "$LOGDIR/$OBJ""_minimal_configure.log"
-	fi
+	make_dir $BUILDDIR/$OBJ true
+	remove_file "Makefile"
+	
+	$WORKDIR/$GCC/configure \
+		--target=$TARGET \
+		--prefix=$TOOLCHAIN \
+		--with-sysroot=$SYSROOT \
+		--disable-libssp \
+		--disable-libgomp \
+		--disable-libmudflap \
+		--disable-shared \
+		--disable-nls \
+		--enable-languages=c 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+
 	do_msg $OBJ "compile"
 	PATH=$TOOLCHAIN/bin:$PATH \
-	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_minimal_make.log"
+	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
+	
 	do_msg $OBJ "install"
 	PATH=$TOOLCHAIN/bin:$PATH \
-	make install 2>&1 | tee "$LOGDIR/$OBJ""_minimal_make_install.log" 
+	make install 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log" 
+	
 	do_msg $OBJ "done"
 	touch $BUILDDIR/$OBJ.done
-	DONTCARE=popd
+	change_dir
 }
 
 gccfull() {
@@ -464,187 +740,31 @@ gccfull() {
     do_patch $WORKDIR/$GCC/gcc/cp/cfns.h $SRCDIR/patch-gcc-cfns.diff
     do_patch $WORKDIR/$GCC/gcc/cp/cfns.gperf $SRCDIR/patch-gcc-cfns-gperf.diff
 	
+	make_dir $BUILDDIR/$OBJ true
+	remove_file "Makefile"
 	
-	mkdir -p $BUILDDIR/$OBJ
-	pushd $BUILDDIR/$OBJ
-	if [ ! -f Makefile ]; then
-		$WORKDIR/$GCC/configure \
-			--target=$TARGET \
-			--prefix=$TOOLCHAIN \
-			--with-sysroot=$SYSROOT \
-			--enable-__cxy_atexit \
-			--disable-libssp \
-			--disable-libgomp \
-			--disable-libmudflap \
-			--enable-languages=c,c++ \
-			--disable-nls 2>&1 | tee "$LOGDIR/$OBJ""_full_configure.log"
-	fi
-	do_msg $OBJ "compile"
-	PATH=$TOOLCHAIN/bin:$PATH \
-	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_full_make.log"
-	do_msg $OBJ "install"
-	PATH=$TOOLCHAIN/bin:$PATH \
-	make install 2>&1 | tee "$LOGDIR/$OBJ""_full_make_install.log" 
-	do_msg $OBJ "done"
-	touch $BUILDDIR/$OBJ.done
-	DONTCARE=popd
-}
+	$WORKDIR/$GCC/configure \
+		--target=$TARGET \
+		--prefix=$TOOLCHAIN \
+		--with-sysroot=$SYSROOT \
+		--enable-__cxy_atexit \
+		--disable-libssp \
+		--disable-libgomp \
+		--disable-libmudflap \
+		--enable-languages=c,c++ \
+		--disable-nls 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
 
-kernelheader() {
-	OBJ=$KERNEL
-	check_done $OBJ && return 0
-	do_msg $OBJ "start"
-	
-	get_url "https://mirrors.edge.kernel.org/pub/linux/kernel/v2.6/$KERNEL.tar.bz2"
-	unpack "$KERNEL.tar.bz2"
-	
-	pushd $WORKDIR/$OBJ
-	do_msg $OBJ "Starting Linux header make"
-	echo "make mrproper" >> $COMMAND_LOG
-	make mrproper 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
-	make headers_check 2>&1 | tee "$LOGDIR/$OBJ""_make_headers_check.log"
-	do_msg $OBJ "Installing toolchain headers"
-	echo "PATH=$TOOLCHAIN/bin:$PATH make ARCH=$ARCH INSTALL_HDR_PATH=$SYSROOT/usr CROSS_COMPILE=$TARGET- headers_install" >> $COMMAND_LOG
-	PATH=$TOOLCHAIN/bin:$PATH \
-	make \
-		ARCH=$ARCH \
-		INSTALL_HDR_PATH=$SYSROOT/usr \
-		CROSS_COMPILE=$TARGET- \
-		headers_install 2>&1 | tee "$LOGDIR/$OBJ""_make_install-headers.log"
-	cp -r $SYSROOT/usr/* $TOOLCHAIN/
-	do_msg $OBJ "done"
-	echo "touch $BUILDDIR/$OBJ.done" >> $COMMAND_LOG
-	touch $BUILDDIR/$OBJ.done
-	DONTCARE=popd
-}
-
-glibcheader() {
-	OBJ=$GLIBC-header
-	check_done $OBJ && return 0
-	do_msg $OBJ "start"
-	
-	get_url "https://ftp.gnu.org/gnu/libc//$GLIBC.tar.gz"
-    get_url "https://ftp.gnu.org/gnu/libc/$GLIBCPORTS.tar.gz"
-    #get_url "www.linuxfromscratch.org/patches/downloads/glibc/glibc-2.11.1-gcc_fix-1.patch"
-	
-	unpack "$GLIBC.tar.gz"
-    unpack "$GLIBCPORTS.tar.gz" "$WORKDIR/$GLIBC" "ports"
-	
-	# Some patches modified and taken from: http://www.linuxfromscratch.org/patches/downloads/glibc/
-    do_patch $WORKDIR/$GLIBC/manual/Makefile $SRCDIR/patch-glibc-Makefile.diff
-    # hsep and vsep not supported by most versions of texinfo: http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080975.html
-    do_patch $WORKDIR/$GLIBC/manual/stdio.texi $SRCDIR/patch-glibc-stdio-texi.diff
-    do_patch $WORKDIR/$GLIBC/nptl/sysdeps/pthread/pt-initfini.c $SRCDIR/patch-glibc-pt-initfini-c.diff
-    do_patch $WORKDIR/$GLIBC/sysdeps/unix/sysv/linux/i386/sysdep.h $SRCDIR/patch-glibc-sysdep-h.diff
-    # Patching configure because we're from the future.
-    do_patch $WORKDIR/$GLIBC/configure $SRCDIR/patch-glibc-configure.diff
-	
-	mkdir -p $BUILDDIR/$OBJ
-	pushd $BUILDDIR/$OBJ
-	if [ ! -f Makefile ]; then
-	
-	    echo "BUILD_CC=gcc CC=$TOOLCHAIN/bin/$TARGET-gcc CXX=$TOOLCHAIN/bin/$TARGET-g++ AR=$TOOLCHAIN/bin/$TARGET-ar LD=$TOOLCHAIN/bin/$TARGET-ld RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib $WORKDIR/$GLIBC/configure --prefix=/usr --with-headers=$SYSROOT/usr/include --build=$BUILD --host=$TARGET --disable-nls --disable-profile --without-gd --without-cvs --enable-add-ons=nptl,ports libc_cv_forced_unwind=yes libc_cv_c_cleanup=yes" >> $COMMAND_LOG
-	
-		BUILD_CC=gcc \
-		CC=$TOOLCHAIN/bin/$TARGET-gcc \
-		CXX=$TOOLCHAIN/bin/$TARGET-g++ \
-		AR=$TOOLCHAIN/bin/$TARGET-ar \
-		LD=$TOOLCHAIN/bin/$TARGET-ld \
-		RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib \
-		$WORKDIR/$GLIBC/configure \
-			--prefix=/usr \
-			--with-headers=$SYSROOT/usr/include \
-			--build=$BUILD \
-			--host=$TARGET \
-			--disable-nls \
-			--disable-profile \
-			--without-gd \
-			--without-cvs \
-			--enable-shared \
-			--enable-add-ons=nptl,ports \
-			--enable-kernel=$(echo $KERNEL | cut -d "-" -f2) \
-			--with-binutils=$TOOLCHAIN/$TARGET/bin \
-			libc_cv_forced_unwind=yes \
-            libc_cv_c_cleanup=yes 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
-	fi
-	
-	do_msg $OBJ "install"
-	make \
-		install-headers \
-		install_root=$SYSROOT \
-		install-bootstrap-headers=yes 2>&1 | tee "$LOGDIR/$OBJ""_make_install-headers.log"
-	do_msg $OBJ "crtX and fake libc"
-	make csu/subdir_lib 2>&1 | tee "$LOGDIR/$OBJ""_make_csu_lib.log"
-	mkdir -p $SYSROOT/usr/lib
-	cp csu/crt1.o csu/crti.o csu/crtn.o $SYSROOT/usr/lib
-	# build a dummy libc
-	$TOOLCHAIN/bin/$TARGET-gcc \
-		-nostdlib \
-		-nostartfiles \
-		-shared \
-		-x c /dev/null \
-		-o $SYSROOT/usr/lib/libc.so 2>&1 | tee "$LOGDIR/$OBJ""_dummy_libc.log"
-	do_msg $OBJ "done"
-	touch $BUILDDIR/$OBJ.done
-	DONTCARE=popd
-}
-
-glibc() {
-	OBJ=$GLIBC
-	check_done $OBJ && return 0
-	do_msg $OBJ "start"
-	
-	get_url "https://ftp.gnu.org/gnu/libc//$GLIBC.tar.gz"
-    get_url "https://ftp.gnu.org/gnu/libc/$GLIBCPORTS.tar.gz"
-    #get_url "www.linuxfromscratch.org/patches/downloads/glibc/glibc-2.11.1-gcc_fix-1.patch"
-	
-	unpack "$GLIBC.tar.gz"
-    unpack "$GLIBCPORTS.tar.gz" "$WORKDIR/$GLIBC" "ports"
-	
-	# Some patches modified and taken from: http://www.linuxfromscratch.org/patches/downloads/glibc/
-    do_patch $WORKDIR/$GLIBC/manual/Makefile $SRCDIR/patch-glibc-Makefile.diff
-    # hsep and vsep not supported by most versions of texinfo: http://lists.openembedded.org/pipermail/openembedded-core/2013-July/080975.html
-    do_patch $WORKDIR/$GLIBC/manual/stdio.texi $SRCDIR/patch-glibc-stdio-texi.diff
-    do_patch $WORKDIR/$GLIBC/nptl/sysdeps/pthread/pt-initfini.c $SRCDIR/patch-glibc-pt-initfini-c.diff
-    do_patch $WORKDIR/$GLIBC/sysdeps/unix/sysv/linux/i386/sysdep.h $SRCDIR/patch-glibc-sysdep-h.diff
-    # Patching configure because we're from the future.
-    do_patch $WORKDIR/$GLIBC/configure $SRCDIR/patch-glibc-configure.diff
-	
-	mkdir -p $BUILDDIR/$OBJ
-	pushd $BUILDDIR/$OBJ
-	if [ ! -f Makefile ]; then
-	
-	    BUILD_CC=gcc \
-		CC=$TOOLCHAIN/bin/$TARGET-gcc \
-		CXX=$TOOLCHAIN/bin/$TARGET-g++ \
-		AR=$TOOLCHAIN/bin/$TARGET-ar \
-		LD=$TOOLCHAIN/bin/$TARGET-ld \
-		RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib \
-		$WORKDIR/$GLIBC/configure \
-		--prefix=/usr \
-		--with-headers=$SYSROOT/usr/include \
-        --build=$BUILD \
-        --host=$TARGET \
-        --disable-nls \
-        --disable-profile \
-        --without-gd \
-        --without-cvs \
-        --enable-add-ons=nptl,ports\
-        --enable-shared \
-        --enable-kernel=$(echo $KERNEL | cut -d "-" -f2) \
-        --with-binutils=$TOOLCHAIN/$TARGET/bin \
-        libc_cv_forced_unwind=yes \
-        libc_cv_c_cleanup=yes
-	fi
 	do_msg $OBJ "compile"
 	PATH=$TOOLCHAIN/bin:$PATH \
 	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
+	
 	do_msg $OBJ "install"
 	PATH=$TOOLCHAIN/bin:$PATH \
-	make install install_root=$SYSROOT 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log"
+	make install 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log" 
+	
 	do_msg $OBJ "done"
 	touch $BUILDDIR/$OBJ.done
-	DONTCARE=popd
+	change_dir
 }
 
 
@@ -793,42 +913,42 @@ if [ "$FORCE_BUILD_BINUTILS" == true ] || [ "$FORCE_BUILD_GCCSTATIC" == true ] |
     if [ "$FORCE_BUILD_BINUTILS" == true ]; then
         remove_dir "$WORKDIR/$BINUTILS"
         remove_dir "$BUILDDIR/$BINUTILS"
-        rm -f "$BUILDDIR/$BINUTILS.done"
+        remove_file "$BUILDDIR/$BINUTILS.done"
         binutils  
     fi
     if [ "$FORCE_BUILD_GCCSTATIC" == true ]; then
         remove_dir "$WORKDIR/$GCC"
         remove_dir "$BUILDDIR/$GCC-static"
-        rm -f "$BUILDDIR/$GCC-static.done"
+        remove_file "$BUILDDIR/$GCC-static.done"
         gccstatic
     fi
     if [ "$FORCE_BUILD_KERNEL_HEADERS" == true ]; then
         remove_dir "$WORKDIR/$KERNEL"
-        rm -f "$BUILDDIR/$KERNEL.done"
+        remove_file "$BUILDDIR/$KERNEL.done"
         kernelheader
     fi
     if [ "$FORCE_BUILD_GLIBC_HEADERS" == true ]; then
         remove_dir "$WORKDIR/$GLIBC"
         remove_dir "$BUILDDIR/$GLIBC-header"
-        rm -f "$BUILDDIR/$GLIBC-header.done"
+        remove_file "$BUILDDIR/$GLIBC-header.done"
         glibcheader
     fi
     if [ "$FORCE_BUILD_GLIBC" == true ]; then
         remove_dir "$WORKDIR/$GLIBC"
         remove_dir "$BUILDDIR/$GLIBC"
-        rm -f "$BUILDDIR/$GLIBC.done"
+        remove_file "$BUILDDIR/$GLIBC.done"
         glibc
     fi
     if [ "$FORCE_BUILD_GCCMINIMAL" == true ]; then
         remove_dir "$WORKDIR/$GCC"
         remove_dir "$BUILDDIR/$GCC-min"
-        rm -f "$BUILDDIR/$GCC-min.done"
+        remove_file "$BUILDDIR/$GCC-min.done"
         gccminimal
     fi
     if [ "$FORCE_BUILD_GCCFULL" == true ]; then
         remove_dir "$WORKDIR/$GCC"
         remove_dir "$BUILDDIR/$GCC"
-        rm -f "$BUILDDIR/$GCC.done"
+        remove_file "$BUILDDIR/$GCC.done"
         gccfull
     fi
 else
@@ -845,4 +965,4 @@ build_success_message
 
 
 grep -v -n "warning:" logs/* | grep -B4 "Error"
-#grep -n -v "warning:" logs/glibc-2.11.1_make_install.log | less
+#grep -n -v "warning:" logs/glibc-2.11.1_make_install.log | less`
