@@ -156,7 +156,7 @@ set_default_shell(){
 # Checks if the supplied package is installed. If not, attempts to install the package.
 # If it fails to find the package after trying to install the package, displays error and exits.
 install_missing_package() {
-    PACKAGE_NAME=$1
+    PACKAGE_NAME="$1"
     PACKAGE_INSTALLED=$(dpkg-query -W --showformat='${Status}\n' $PACKAGE_NAME | grep "install ok installed")
     echo -e -n "$STAT Checking for $PACKAGE_NAME..."
     if [ "" == "$PACKAGE_INSTALLED" ]; then
@@ -345,8 +345,6 @@ binutils() {
         x86_64)
             echo "ln -sv $TOOLCHAIN/lib $TOOLCHAIN/lib64" >> $COMMAND_LOG
             ln -sv $TOOLCHAIN/lib $TOOLCHAIN/lib64
-            #echo "ln -sv $TOOLCHAIN/$TARGET/lib $TOOLCHAIN/$TARGET/lib64" >> $COMMAND_LOG
-            #ln -sv $TOOLCHAIN/$TARGET/lib $TOOLCHAIN/$TARGET/lib64
         ;;
     esac
 	
@@ -397,7 +395,7 @@ gccstatic() {
 	make_dir $BUILDDIR/$OBJ true
 	remove_file "Makefile"
 	
-    echo "$WORKDIR/$GCC/configure --target=$TARGET --prefix=$TOOLCHAIN --with-gmp-includes=$BUILDDIR/$OBJ/gmp --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs --without-headers --with-newlib --disable-shared --disable-threads --disable-libssp --disable-libgomp --disable-libmudflap --disable-nls --disable-multilib --disable-decimal-float --enable-languages=c --without-ppl --without-cloog" >> $COMMAND_LOG
+    echo "$WORKDIR/$GCC/configure --target=$TARGET --prefix=$TOOLCHAIN --without-headers --with-newlib --disable-shared --disable-threads --disable-libssp --disable-libgomp --disable-libmudflap --disable-nls --libexecdir=$TOOLCHAIN/lib --with-gmp-include=$BUILDDIR/$OBJ/gmp --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs --enable-languages=c 2>&1 | tee $LOGDIR/$OBJ""_configure.log" >> $COMMAND_LOG
     
     $WORKDIR/$GCC/configure \
 	    --target=$TARGET \
@@ -542,7 +540,7 @@ glibcheader() {
 	LD=$TOOLCHAIN/bin/$TARGET-ld \
 	RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib \
 	$WORKDIR/$GLIBC/configure \
-		--prefix=$SYSROOT/usr \
+		--prefix=/usr \
 		--with-headers=$SYSROOT/usr/include \
 		--build=$BUILD \
 		--host=$TARGET \
@@ -605,20 +603,18 @@ glibc() {
     do_patch $WORKDIR/$GLIBC/manual/stdio.texi $SRCDIR/patch-glibc-stdio-texi.diff
     do_patch $WORKDIR/$GLIBC/nptl/sysdeps/pthread/pt-initfini.c $SRCDIR/patch-glibc-pt-initfini-c.diff
     do_patch $WORKDIR/$GLIBC/sysdeps/unix/sysv/linux/i386/sysdep.h $SRCDIR/patch-glibc-sysdep-h.diff
-    # Patching configure because we're from the future.
+    # Patching configure because we're from the future and we add a configure options to disable texinfo,
+    # which mysteriously breaks the "make install". Unsure why it does this, how you would know it's texinfo
+    # (no texinfo error message is produced; this was a random suggestion I saw in a thread somewhere),
+    # and what exactly needs fixing, but it's somewhere in the many texi's and I don't care.
     do_patch $WORKDIR/$GLIBC/configure $SRCDIR/patch-glibc-configure.diff
     do_patch $WORKDIR/$GLIBC/elf/ldd.bash.in $SRCDIR/patch-glibc-ldd-bash-in.diff
-	
-	#sed -i "s|libs -o|libs -L$SYSROOT/lib -Wl,-dynamic-linker=ld-linux.so.3 -o|" $WORKDIR/$GLIBC/scripts/test-installation.pl
+	# Patch http://www.at91.com/viewtopic.php?t=213 already in glibc-2.11.1
 	
 	make_dir $BUILDDIR/$OBJ true
-	remove_file "Makefile"
-	
-    # --disable-nls \
-    # --without-cvs \
+	remove_file "Makefile"	
     # --enable-shared \
-    #LIBS=$SYSROOT/lib:$SYSROOT/usr/lib \
-    #        libc_cv_forced_unwind=yes \
+    
     PATH=$TOOLCHAIN/lib/gcc/$TARGET/4.5.1/:$SYSROOT/usr/lib:$SYSROOT/usr/include:$TOOLCHAIN:$TOOLCHAIN/include:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin \
     BUILD_CC=gcc \
 	CC=$TOOLCHAIN/bin/$TARGET-gcc \
@@ -628,10 +624,11 @@ glibc() {
 	RANLIB=$TOOLCHAIN/bin/$TARGET-ranlib \
 	CFLAGS="-O2 -g -Wall -I$SYSROOT/usr/include -I$BUILDDIR/$GLIBC-header -I$WORKDIR/$GLIBC/include -L$SYSROOT/lib -L$SYSROOT/usr/lib -L$BUILDDIR/$GLIBC-header/csu -I$BUILDDIR/$GLIBC-header/csu" \
 	$WORKDIR/$GLIBC/configure \
-	    --prefix=$SYSROOT/usr \
+	    --prefix=/usr \
 		--with-headers=$SYSROOT/usr/include \
 		--build=$BUILD \
 		--host=$TARGET \
+		--disable-makeinfo \
 		--disable-nls \
 		--disable-profile \
 		--without-gd \
@@ -643,10 +640,12 @@ glibc() {
         libc_cv_c_cleanup=yes 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
 	
 	do_msg $OBJ "compile"
+	echo "PATH=$TOOLCHAIN/bin:$PATH make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
 	PATH=$TOOLCHAIN/bin:$PATH \
 	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
 	
 	do_msg $OBJ "install"
+	echo "PATH=$TOOLCHAIN/bin:$PATH make install install_root=$SYSROOT 2>&1 | tee $LOGDIR/$OBJ""_make_install.log" >> $COMMAND_LOG
 	PATH=$TOOLCHAIN/bin:$PATH \
 	make install install_root=$SYSROOT 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log"
 	
@@ -794,7 +793,6 @@ do
         ;;
         --glibc)
             FORCE_BUILD_GLIBC=true
-            echo "FORCE BUILD GLIBC $FORCE_BUILD_GLIBC"
             shift # past argument
         ;;
         --glibc-headers)
@@ -831,8 +829,10 @@ do
             shift # past argument
         ;;
         *)    # unknown option
-            POSITIONAL+=("$1") # save it in an array for later
-            shift # past argument
+            # POSITIONAL+=("$1") # save it in an array for later
+            #shift # past argument
+            echo -e "$BAD Unknown command line option specified: $1"
+            exit 1
         ;;
     esac
 done
@@ -887,15 +887,15 @@ fi
 ####################
 #### SETUP TIME ####
 ####################
+# Install missing packages. (Not yet sure if we need libelf-dev)
+#install_missing_package "build-essential"
+#install_missing_package "texinfo"
+#install_missing_package "autoconf"
+#install_missing_package "gperf"
+#install_missing_package "libelf-dev"
+
 # Asks you to change your default shell from dash to bash.
 set_default_shell
-
-# Install missing packages. (Not yet sure if we need libelf-dev)
-install_missing_package "build-essential"
-install_missing_package "texinfo"
-install_missing_package "autoconf"
-install_missing_package "gperf"
-#install_missing_package "libelf-dev"
 
 # Create necessary directories to work with, if they don't already exist.
 make_dir $SYSROOT
