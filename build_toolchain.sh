@@ -746,9 +746,16 @@ gccfull() {
 		--prefix=$TOOLCHAIN \
 		--with-sysroot=$SYSROOT \
 		--enable-__cxy_atexit \
-		--disable-libssp \
 		--disable-libgomp \
 		--disable-libmudflap \
+		--disable-libssp \
+		--disable-nls \
+		--disable-shared \
+		--disable-threads \
+		--with-newlib \
+	    --libexecdir=$TOOLCHAIN/lib \
+	    --with-gmp-include=$BUILDDIR/$OBJ/gmp \
+	    --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs \
 		--enable-languages=c,c++ \
 		--disable-nls 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
 
