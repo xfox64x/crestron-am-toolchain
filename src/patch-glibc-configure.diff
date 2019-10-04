@@ -29,3 +29,32 @@
    case $ac_prog_version in
      '') ac_prog_version="v. ?.??, bad"; ac_verc_fail=yes;;
      3.0[2-9]*|3.[1-9]*|[4-9]*)
+--- work/glibc-2.11.1/configure	2019-10-04 16:24:17.363256102 +0000
++++ work/glibc-2.11.1/configure.new	2019-10-04 16:43:14.079452043 +0000
+@@ -875,6 +875,7 @@
+ # Use braces instead of parens because sh, perl, etc. also accept them.
+ # (The list follows the same order as the GNU Coding Standards.)
+ bindir='${exec_prefix}/bin'
++disablemakeinfo=false
+ sbindir='${exec_prefix}/sbin'
+ libexecdir='${exec_prefix}/libexec'
+ datarootdir='${prefix}/share'
+@@ -948,6 +949,9 @@
+   | --dataroot=* | --dataroo=* | --dataro=* | --datar=*)
+     datarootdir=$ac_optarg ;;
+ 
++  --disable-makeinfo)
++    disablemakeinfo=true;;
++
+   -disable-* | --disable-*)
+     ac_useropt=`expr "x$ac_option" : 'x-*disable-\(.*\)'`
+     # Reject names that are not valid shell variable names.
+@@ -5214,7 +5218,7 @@
+ fi
+ fi
+ MAKEINFO=$ac_cv_prog_MAKEINFO
+-if test -n "$MAKEINFO"; then
++if test -n "$MAKEINFO" && [ "$disablemakeinfo" == false ] ; then
+   { $as_echo "$as_me:$LINENO: result: $MAKEINFO" >&5
+ $as_echo "$MAKEINFO" >&6; }
+ else
