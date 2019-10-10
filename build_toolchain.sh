@@ -827,37 +827,31 @@ gdb() {
 	check_done $OBJ && return 0
 	do_msg $OBJ "start"
 	
-	#get_url "https://ftp.gnu.org/gnu/gcc/$GCC/$GCC.tar.bz2"
+	get_url "https://ftp.gnu.org/gnu/gdb/$GDB.tar.gz"
     
 	unpack "$GDB.tar.gz"
     
 	make_dir $BUILDDIR/$OBJ true
 	remove_file "Makefile"
 	
-	#echo "" >> $COMMAND_LOG
+	echo "PATH=$PATH:$TOOLCHAIN/bin $WORKDIR/$GDB/configure --host=$TARGET 2>&1 | tee $LOGDIR/$OBJ""_configure.log" >> $COMMAND_LOG
 	
 	PATH=$PATH:$TOOLCHAIN/bin \
 	    $WORKDIR/$GDB/configure \
 	    --host=$TARGET 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
-	    
-
-
-
-    PATH=$PATH:$TOOLCHAIN/bin \
-        make
-
-	#PATH=$PATH:/root/arm_toolchain/toolchain/bin /root/arm_toolchain/work/gdb-8.3/configure --host=arm-unknown-linux-gnueabi   
-    #PATH=$PATH:/root/arm_toolchain/toolchain/bin make
-
-
-
-#    cp $BUILDDIR/$OBJ/config.log "$LOGDIR/$OBJ""_config.log"
-
-#	do_msg $OBJ "compile"
 	
-#	echo "PATH=$TOOLCHAIN/bin:$PATH make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
-#	PATH=$TOOLCHAIN/bin:$PATH \
-#	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
+	cp $BUILDDIR/$OBJ/config.log "$LOGDIR/$OBJ""_config.log"
+	
+	do_msg $OBJ "compile"
+	echo "PATH=$PATH:$TOOLCHAIN/bin CXXFLAGS=\"-Os -s\" make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
+	    
+    PATH=$PATH:$TOOLCHAIN/bin \
+    CXXFLAGS="-Os -s" \
+        make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
+	
+	file $BUILDDIR/$GDB/gdb/gdbserver/gdbserver
+	
+	file $BUILDDIR/$GDB/gdb/gdb
 	
 #	do_msg $OBJ "install"
 #	echo "PATH=$TOOLCHAIN/bin:$PATH make install 2>&1 | tee $LOGDIR/$OBJ""_make_install.log" >> $COMMAND_LOG
@@ -865,8 +859,8 @@ gdb() {
 #	PATH=$TOOLCHAIN/bin:$PATH \
 #	make install 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log" 
 	
-#	do_msg $OBJ "done"
-#	touch $BUILDDIR/$OBJ.done
+	do_msg $OBJ "done"
+	touch $BUILDDIR/$OBJ.done
 	change_dir
 }
 
