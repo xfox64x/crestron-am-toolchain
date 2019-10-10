@@ -1,0 +1,11 @@
+--- ./work/glibc-2.11.1/manual/stdio.texi     2009-12-08 20:10:20.000000000 +0000
++++ ./work/glibc-2.11.1/manual/stdio.texi.new 2019-10-03 16:24:57.935034283 +0000
+@@ -3119,7 +3119,7 @@
+ etc.  The full table is:
+ 
+ @ifinfo
+-@multitable @hsep @vsep {' '} {2^10 (1024)} {zetta} {Upper} {10^24 (1000)}
++@multitable {' '} {2^10 (1024)} {zetta} {Upper} {10^24 (1000)}
+ @item low @tab Multiplier  @tab From  @tab Upper @tab Multiplier
+ @item ' ' @tab 1           @tab       @tab ' '   @tab 1
+ @item k   @tab 2^10 (1024) @tab kilo  @tab K     @tab 10^3 (1000)
