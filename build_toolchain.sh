@@ -21,6 +21,7 @@ MPC=mpc-0.8.1
 MPFR=mpfr-2.4.2
 GLIBC=glibc-2.11.1
 GLIBCPORTS=glibc-ports-2.11
+GDB=gdb-7.12
 
 GREEN="\e[38;5;118m"
 RED="\e[38;5;203m"
@@ -47,7 +48,7 @@ FORCE_BUILD_GLIBC=false         # Whether this is a partial build, rebuilding gl
 FORCE_BUILD_GLIBC_HEADERS=false  # Whether this is a partial build, rebuilding glibc.
 FORCE_BUILD_GCCMINIMAL=false    # Whether this is a partial build, rebuilding gcc-minimal.
 FORCE_BUILD_GCCFULL=false       # Whether this is a partial build, rebuilding gcc-full.
-
+FORCE_BUILD_GDB=false           # Whether this is a partial build, rebuilding gdb.
 
 
 ##########################
@@ -126,8 +127,10 @@ build_failed_message(){
     
     if [ "$object_name" != "" ]; then
         echo -e "$BAD$RED Grep'd errors from log files:$END\n"
-        grep "Error" "$LOGDIR/$object_name""_make.log"
-        grep "Error" "$LOGDIR/$object_name""_make_install.log"
+        grep -v -n "warning:" $LOGDIR/$object_name* | grep -B4 "Error"
+        grep -v -n "warning:" $LOGDIR/$object_name* | grep -B4 "Error"
+        #grep "Error" "$LOGDIR/$object_name""_make.log"
+        #grep "Error" "$LOGDIR/$object_name""_make_install.log"
         echo "\n"
     fi
     exit 1
@@ -337,6 +340,8 @@ binutils() {
 		--disable-nls \
 		--disable-werror
 	
+	cp $BUILDDIR/$OBJ/config.log "$LOGDIR/$OBJ""_config.log"
+	
 	do_msg $OBJ "do make"
 	echo "make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
 	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
@@ -386,6 +391,7 @@ gccstatic() {
     do_patch $WORKDIR/$GCC/gcc/doc/cppopts.texi $SRCDIR/patch-cppopts.texi.diff
     do_patch $WORKDIR/$GCC/gcc/doc/invoke.texi $SRCDIR/patch-invoke-texi.diff
     do_patch $WORKDIR/$GCC/gcc/doc/generic.texi $SRCDIR/patch-generic-texi.diff
+    do_patch $WORKDIR/$GCC/gcc/pretty-print.h $SRCDIR/patch-gcc-pretty-print-h.diff
 	# TODO: Unsure if these two should be patched or if installing gperf is the answer.
     # patch-gcc-cfns-gperf.diff is necessary
     # https://github.com/parallaxinc/propgcc/issues/79
@@ -395,23 +401,48 @@ gccstatic() {
 	make_dir $BUILDDIR/$OBJ true
 	remove_file "Makefile"
 	
-    echo "$WORKDIR/$GCC/configure --target=$TARGET --prefix=$TOOLCHAIN --without-headers --with-newlib --disable-shared --disable-threads --disable-libssp --disable-libgomp --disable-libmudflap --disable-nls --libexecdir=$TOOLCHAIN/lib --with-gmp-include=$BUILDDIR/$OBJ/gmp --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs --enable-languages=c 2>&1 | tee $LOGDIR/$OBJ""_configure.log" >> $COMMAND_LOG
+    #echo "$WORKDIR/$GCC/configure --target=$TARGET --prefix=$TOOLCHAIN --without-headers --with-newlib --disable-shared --disable-threads --disable-libssp --disable-libgomp --disable-libmudflap --disable-nls --libexecdir=$TOOLCHAIN/lib --with-gmp-include=$BUILDDIR/$OBJ/gmp --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs --enable-languages=c 2>&1 | tee $LOGDIR/$OBJ""_configure.log" >> $COMMAND_LOG
     
+    echo "CC=gcc-9 CXX=g++-9 $WORKDIR/$GCC/configure --target=$TARGET --prefix=$TOOLCHAIN --disable-nls --disable-shared --disable-multilib --disable-decimal-float --disable-threads --disable-libmudflap --disable-libssp --disable-libgomp --enable-languages=c --with-gmp-include=$BUILDDIR/$OBJ/gmp --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs --without-ppl --without-cloog" >> $COMMAND_LOG
+    
+    # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=925692
+    CC=gcc-9 \
+    CXX=g++-9 \
     $WORKDIR/$GCC/configure \
 	    --target=$TARGET \
 	    --prefix=$TOOLCHAIN \
-	    --without-headers \
-	    --with-newlib \
+	    --disable-nls \
 	    --disable-shared \
+	    --disable-multilib \
+	    --disable-decimal-float \
 	    --disable-threads \
+	    --disable-libmudflap \
 	    --disable-libssp \
 	    --disable-libgomp \
-	    --disable-libmudflap \
-	    --disable-nls \
-	    --libexecdir=$TOOLCHAIN/lib \
+	    --enable-languages=c \
 	    --with-gmp-include=$BUILDDIR/$OBJ/gmp \
 	    --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs \
-	    --enable-languages=c 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+	    --without-ppl
+	    --without-cloog 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+    
+   
+#    CC=gcc-9 \
+#    CXX=g++-9 \
+#    $WORKDIR/$GCC/configure \
+#	    --target=$TARGET \
+#	    --prefix=$TOOLCHAIN \
+#	    --without-headers \
+#	    --with-newlib \
+#	    --disable-shared \
+#	    --disable-threads \
+#	    --disable-libssp \
+#	    --disable-libgomp \
+#	    --disable-libmudflap \
+#	    --disable-nls \
+#	    --libexecdir=$TOOLCHAIN/lib \
+#	    --with-gmp-include=$BUILDDIR/$OBJ/gmp \
+#	    --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs \
+#	    --enable-languages=c 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"    
     
 	#$WORKDIR/$GCC/configure \
 	#	--target=$TARGET \
@@ -431,13 +462,21 @@ gccstatic() {
 	#	--without-ppl \
 	#	--without-cloog 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
 	
+	cp $BUILDDIR/$OBJ/config.log "$LOGDIR/$OBJ""_config.log"
+	
 	do_msg $OBJ "do make"
 	echo "PATH=$TOOLCHAIN/bin:$PATH make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
+    
+    CC=gcc-9 \
+    CXX=g++-9 \
 	PATH=$TOOLCHAIN/bin:$PATH \
 	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
 	
 	do_msg $OBJ "do make install to $TOOLCHAIN/$TARGET"
 	echo "PATH=$TOOLCHAIN/bin:$PATH make install 2>&1 | tee $LOGDIR/$OBJ""_make_install.log" >> $COMMAND_LOG
+	
+	CC=gcc-9 \
+    CXX=g++-9 \
 	PATH=$TOOLCHAIN/bin:$PATH \
 	make install 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log"
 
@@ -555,6 +594,8 @@ glibcheader() {
 		libc_cv_forced_unwind=yes \
         libc_cv_c_cleanup=yes 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
 	
+	cp $BUILDDIR/$OBJ/config.log "$LOGDIR/$OBJ""_config.log"
+	
 	do_msg $OBJ "install"
 	make \
 		install-headers \
@@ -639,6 +680,8 @@ glibc() {
 		libc_cv_forced_unwind=yes \
         libc_cv_c_cleanup=yes 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
 	
+	cp $BUILDDIR/$OBJ/config.log "$LOGDIR/$OBJ""_config.log"
+	
 	do_msg $OBJ "compile"
 	echo "PATH=$TOOLCHAIN/bin:$PATH make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
 	PATH=$TOOLCHAIN/bin:$PATH \
@@ -677,6 +720,7 @@ gccminimal() {
     do_patch $WORKDIR/$GCC/gcc/doc/cppopts.texi $SRCDIR/patch-cppopts.texi.diff
     do_patch $WORKDIR/$GCC/gcc/doc/invoke.texi $SRCDIR/patch-invoke-texi.diff
     do_patch $WORKDIR/$GCC/gcc/doc/generic.texi $SRCDIR/patch-generic-texi.diff
+	do_patch $WORKDIR/$GCC/gcc/pretty-print.h $SRCDIR/patch-gcc-pretty-print-h.diff
 	# TODO: Unsure if these two should be patched or if installing gperf is the answer.
     # patch-gcc-cfns-gperf.diff is necessary
     # https://github.com/parallaxinc/propgcc/issues/79
@@ -695,7 +739,9 @@ gccminimal() {
 		--disable-libmudflap \
 		--disable-shared \
 		--disable-nls \
-		--enable-languages=c 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+		--enable-languages=c,c++ 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+
+    cp $BUILDDIR/$OBJ/config.log "$LOGDIR/$OBJ""_config.log"
 
 	do_msg $OBJ "compile"
 	PATH=$TOOLCHAIN/bin:$PATH \
@@ -732,6 +778,7 @@ gccfull() {
     do_patch $WORKDIR/$GCC/gcc/doc/cppopts.texi $SRCDIR/patch-cppopts.texi.diff
     do_patch $WORKDIR/$GCC/gcc/doc/invoke.texi $SRCDIR/patch-invoke-texi.diff
     do_patch $WORKDIR/$GCC/gcc/doc/generic.texi $SRCDIR/patch-generic-texi.diff
+	do_patch $WORKDIR/$GCC/gcc/pretty-print.h $SRCDIR/patch-gcc-pretty-print-h.diff
 	# TODO: Unsure if these two should be patched or if installing gperf is the answer.
     # patch-gcc-cfns-gperf.diff is necessary
     # https://github.com/parallaxinc/propgcc/issues/79
@@ -741,29 +788,30 @@ gccfull() {
 	make_dir $BUILDDIR/$OBJ true
 	remove_file "Makefile"
 	
+	echo "$WORKDIR/$GCC/configure --target=$TARGET --prefix=$TOOLCHAIN --with-sysroot=$SYSROOT --disable-libssp --disable-libgomp --disable-libmudflap --disable-shared --disable-nls --enable-languages=c,c++ 2>&1 | tee $LOGDIR/$OBJ""_configure.log" >> $COMMAND_LOG
+	
 	$WORKDIR/$GCC/configure \
 		--target=$TARGET \
 		--prefix=$TOOLCHAIN \
 		--with-sysroot=$SYSROOT \
-		--enable-__cxy_atexit \
+		--disable-libssp \
 		--disable-libgomp \
 		--disable-libmudflap \
-		--disable-libssp \
-		--disable-nls \
 		--disable-shared \
-		--disable-threads \
-		--with-newlib \
-	    --libexecdir=$TOOLCHAIN/lib \
-	    --with-gmp-include=$BUILDDIR/$OBJ/gmp \
-	    --with-gmp-lib=$BUILDDIR/$OBJ/gmp/.libs \
-		--enable-languages=c,c++ \
-		--disable-nls 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+		--disable-nls \
+		--enable-languages=c,c++ 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+
+    cp $BUILDDIR/$OBJ/config.log "$LOGDIR/$OBJ""_config.log"
 
 	do_msg $OBJ "compile"
+	
+	echo "PATH=$TOOLCHAIN/bin:$PATH make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
 	PATH=$TOOLCHAIN/bin:$PATH \
 	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
 	
 	do_msg $OBJ "install"
+	echo "PATH=$TOOLCHAIN/bin:$PATH make install 2>&1 | tee $LOGDIR/$OBJ""_make_install.log" >> $COMMAND_LOG
+	
 	PATH=$TOOLCHAIN/bin:$PATH \
 	make install 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log" 
 	
@@ -772,6 +820,55 @@ gccfull() {
 	change_dir
 }
 
+
+
+gdb() {
+	OBJ=$GDB
+	check_done $OBJ && return 0
+	do_msg $OBJ "start"
+	
+	#get_url "https://ftp.gnu.org/gnu/gcc/$GCC/$GCC.tar.bz2"
+    
+	unpack "$GDB.tar.gz"
+    
+	make_dir $BUILDDIR/$OBJ true
+	remove_file "Makefile"
+	
+	#echo "" >> $COMMAND_LOG
+	
+	PATH=$PATH:$TOOLCHAIN/bin \
+	    $WORKDIR/$GDB/configure \
+	    --host=$TARGET 2>&1 | tee "$LOGDIR/$OBJ""_configure.log"
+	    
+
+
+
+    PATH=$PATH:$TOOLCHAIN/bin \
+        make
+
+	#PATH=$PATH:/root/arm_toolchain/toolchain/bin /root/arm_toolchain/work/gdb-8.3/configure --host=arm-unknown-linux-gnueabi   
+    #PATH=$PATH:/root/arm_toolchain/toolchain/bin make
+
+
+
+#    cp $BUILDDIR/$OBJ/config.log "$LOGDIR/$OBJ""_config.log"
+
+#	do_msg $OBJ "compile"
+	
+#	echo "PATH=$TOOLCHAIN/bin:$PATH make $PARALLEL 2>&1 | tee $LOGDIR/$OBJ""_make.log" >> $COMMAND_LOG
+#	PATH=$TOOLCHAIN/bin:$PATH \
+#	make $PARALLEL 2>&1 | tee "$LOGDIR/$OBJ""_make.log"
+	
+#	do_msg $OBJ "install"
+#	echo "PATH=$TOOLCHAIN/bin:$PATH make install 2>&1 | tee $LOGDIR/$OBJ""_make_install.log" >> $COMMAND_LOG
+	
+#	PATH=$TOOLCHAIN/bin:$PATH \
+#	make install 2>&1 | tee "$LOGDIR/$OBJ""_make_install.log" 
+	
+#	do_msg $OBJ "done"
+#	touch $BUILDDIR/$OBJ.done
+	change_dir
+}
 
 
 ######################################
@@ -818,7 +915,10 @@ do
             FORCE_BUILD_GCCFULL=true
             shift # past argument
         ;;
-        
+        --gdb)
+            FORCE_BUILD_GDB=true
+            shift # past argument
+        ;;
         -r|-rb|--restart-build)
             RESTART_BUILD=true
             shift # past argument
@@ -883,7 +983,7 @@ elif [ "$CLEAN" = true ]; then
     remove_dir $WORKDIR
     remove_dir $TOOLCHAIN
     remove_dir $SYSROOT
-    remove_dir $SRCDIR
+    #remove_dir $SRCDIR
     remove_dir $LOGDIR
     exit 1
 fi
@@ -915,7 +1015,7 @@ make_dir $BUILDDIR
 #### BUILD TIME ####
 ####################
 
-if [ "$FORCE_BUILD_BINUTILS" == true ] || [ "$FORCE_BUILD_GCCSTATIC" == true ] || [ "$FORCE_BUILD_KERNEL_HEADERS" == true ] || [ "$FORCE_BUILD_GLIBC_HEADERS" == true ] || [ "$FORCE_BUILD_GLIBC" == true ] || [ "$FORCE_BUILD_GCCMINIMAL" == true ] || [ "$FORCE_BUILD_GCCFULL" == true ]; then
+if [ "$FORCE_BUILD_BINUTILS" == true ] || [ "$FORCE_BUILD_GCCSTATIC" == true ] || [ "$FORCE_BUILD_KERNEL_HEADERS" == true ] || [ "$FORCE_BUILD_GLIBC_HEADERS" == true ] || [ "$FORCE_BUILD_GLIBC" == true ] || [ "$FORCE_BUILD_GCCMINIMAL" == true ] || [ "$FORCE_BUILD_GCCFULL" == true ] || [ "$FORCE_BUILD_GDB" == true ]; then
     if [ "$FORCE_BUILD_BINUTILS" == true ]; then
         remove_dir "$WORKDIR/$BINUTILS"
         remove_dir "$BUILDDIR/$BINUTILS"
@@ -957,6 +1057,12 @@ if [ "$FORCE_BUILD_BINUTILS" == true ] || [ "$FORCE_BUILD_GCCSTATIC" == true ] |
         remove_file "$BUILDDIR/$GCC.done"
         gccfull
     fi
+    if [ "$FORCE_BUILD_GDB" == true ]; then
+        remove_dir "$WORKDIR/$GDB"
+        remove_dir "$BUILDDIR/$GDB"
+        remove_file "$BUILDDIR/$GDB.done"
+        gdb
+    fi
 else
     binutils
     gccstatic
@@ -965,10 +1071,11 @@ else
     glibc
     gccminimal
     gccfull
+    gdb
 fi
 
 build_success_message
 
 
 grep -v -n "warning:" logs/* | grep -B4 "Error"
-#grep -n -v "warning:" logs/glibc-2.11.1_make_install.log | less
+#grep -n -v "warning:" logs/glibc-2.11.1_make_install.log | less    
