@@ -1,0 +1,11 @@
+--- ./work/gcc-4.5.1/gcc/pretty-print.h 2009-11-25 05:55:54.000000000 -0500
++++ ./work/gcc-4.5.1/gcc/pretty-print.h.new     2019-10-10 12:10:08.275984284 -0400
+@@ -310,7 +310,7 @@
+ 
+ /* This header may be included before toplev.h, hence the duplicate
+    definitions to allow for GCC-specific formats.  */
+-#if GCC_VERSION >= 3005
++#if (GCC_VERSION >= 3005) && (GCC_VERSION < 9001)
+ #define ATTRIBUTE_GCC_PPDIAG(m, n) __attribute__ ((__format__ (__gcc_diag__, m ,n))) ATTRIBUTE_NONNULL(m)
+ #else
+ #define ATTRIBUTE_GCC_PPDIAG(m, n) ATTRIBUTE_NONNULL(m)
