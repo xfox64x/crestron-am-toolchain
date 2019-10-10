@@ -1,5 +1,5 @@
---- /home/jackson/arm_toolchain/work/glibc-2.11.1/manual/Makefile       2009-12-08 20:10:20.000000000 +0000
-+++ /home/jackson/arm_toolchain/work/glibc-2.11.1/manual/Makefile.new   2019-09-26 16:53:42.907282105 +0000
+--- ./work/glibc-2.11.1/manual/Makefile       2009-12-08 20:10:20.000000000 +0000
++++ ./work/glibc-2.11.1/manual/Makefile.new   2019-09-26 16:53:42.907282105 +0000
 @@ -232,7 +232,11 @@
  .PHONY: stubs
  stubs: $(objpfx)stubs
