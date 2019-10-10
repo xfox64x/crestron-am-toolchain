@@ -1,5 +1,5 @@
---- work/glibc-2.11.1/sysdeps/unix/sysv/linux/i386/sysdep.h     2009-12-08 20:10:20.000000000 +0000
-+++ work/glibc-2.11.1/sysdeps/unix/sysv/linux/i386/sysdep.h.new 2019-09-26 17:02:58.707352938 +0000
+--- ./work/glibc-2.11.1/sysdeps/unix/sysv/linux/i386/sysdep.h     2009-12-08 20:10:20.000000000 +0000
++++ ./work/glibc-2.11.1/sysdeps/unix/sysv/linux/i386/sysdep.h.new 2019-09-26 17:02:58.707352938 +0000
 @@ -29,6 +29,11 @@
  #include <dl-sysdep.h>
  #include <tls.h>
