@@ -1,5 +1,5 @@
---- cfns.gperf  2009-04-21 19:03:23.000000000 +0000
-+++ cfns.gperf.new      2019-10-01 14:55:32.696499217 +0000
+--- ./work/gcc-4.5.1/gcc/cp/cfns.gperf  2009-04-21 19:03:23.000000000 +0000
++++ ./work/gcc-4.5.1/gcc/cp/cfns.gperf.new      2019-10-01 14:55:32.696499217 +0000
 @@ -22,6 +22,9 @@
  static unsigned int hash (const char *, unsigned int);
  #ifdef __GNUC__
