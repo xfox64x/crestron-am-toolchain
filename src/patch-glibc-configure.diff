@@ -1,5 +1,5 @@
---- work/glibc-2.11.1/configure 2009-12-08 20:10:20.000000000 +0000
-+++ work/glibc-2.11.1/configure.new     2019-09-26 17:38:14.427718648 +0000
+--- ./work/glibc-2.11.1/configure 2009-12-08 20:10:20.000000000 +0000
++++ ./work/glibc-2.11.1/configure.new     2019-09-26 17:38:14.427718648 +0000
 @@ -5108,7 +5108,7 @@
    ac_prog_version=`$MAKE --version 2>&1 | sed -n 's/^.*GNU Make[^0-9]*\([0-9][0-9.]*\).*$/\1/p'`
    case $ac_prog_version in
@@ -9,8 +9,8 @@
         ac_prog_version="$ac_prog_version, ok"; ac_verc_fail=no;;
      *) ac_prog_version="$ac_prog_version, bad"; ac_verc_fail=yes;;
  
---- work/glibc-2.11.1/configure 2019-09-26 17:39:57.635698227 +0000
-+++ work/glibc-2.11.1/configure.new     2019-09-26 17:46:53.615642407 +0000
+--- ./work/glibc-2.11.1/configure 2019-09-26 17:39:57.635698227 +0000
++++ ./work/glibc-2.11.1/configure.new     2019-09-26 17:46:53.615642407 +0000
 @@ -5235,7 +5235,7 @@
    ac_prog_version=`$MAKEINFO --version 2>&1 | sed -n 's/^.*GNU texinfo.* \([0-9][0-9.]*\).*$/\1/p'`
    case $ac_prog_version in
@@ -29,8 +29,8 @@
    case $ac_prog_version in
      '') ac_prog_version="v. ?.??, bad"; ac_verc_fail=yes;;
      3.0[2-9]*|3.[1-9]*|[4-9]*)
---- work/glibc-2.11.1/configure	2019-10-04 16:24:17.363256102 +0000
-+++ work/glibc-2.11.1/configure.new	2019-10-04 16:43:14.079452043 +0000
+--- ./work/glibc-2.11.1/configure	2019-10-04 16:24:17.363256102 +0000
++++ ./work/glibc-2.11.1/configure.new	2019-10-04 16:43:14.079452043 +0000
 @@ -875,6 +875,7 @@
  # Use braces instead of parens because sh, perl, etc. also accept them.
  # (The list follows the same order as the GNU Coding Standards.)
