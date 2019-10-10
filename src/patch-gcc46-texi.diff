@@ -1,5 +1,5 @@
---- ./gcc/doc/gcc.texi.orig     2017-03-01 16:56:48.000000000 -0800
-+++ ./gcc/doc/gcc.texi  2017-03-01 17:03:38.000000000 -0800
+--- ./work/gcc-4.5.1/gcc/doc/gcc.texi.orig     2017-03-01 16:56:48.000000000 -0800
++++ ./work/gcc-4.5.1/gcc/doc/gcc.texi  2017-03-01 17:03:38.000000000 -0800
 @@ -86,9 +86,15 @@
  @item GNU Press
  @tab Website: www.gnupress.org
