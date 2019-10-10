@@ -1,5 +1,5 @@
---- cfns.h      2009-04-21 19:03:23.000000000 +0000
-+++ cfns.h.new  2019-10-01 13:48:34.951247952 +0000
+--- ./work/gcc-4.5.1/gcc/cp/cfns.h      2009-04-21 19:03:23.000000000 +0000
++++ ./work/gcc-4.5.1/gcc/cp/cfns.h.new  2019-10-01 13:48:34.951247952 +0000
 @@ -53,6 +53,9 @@
  static unsigned int hash (const char *, unsigned int);
  #ifdef __GNUC__
