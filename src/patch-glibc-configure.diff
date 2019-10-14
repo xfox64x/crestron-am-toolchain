@@ -1,5 +1,5 @@
---- ./work/glibc-2.11.1/configure 2009-12-08 20:10:20.000000000 +0000
-+++ ./work/glibc-2.11.1/configure.new     2019-09-26 17:38:14.427718648 +0000
+--- work/glibc-2.11.1/configure 2009-12-08 20:10:20.000000000 +0000
++++ work/glibc-2.11.1/configure.new     2019-09-26 17:38:14.427718648 +0000
 @@ -5108,7 +5108,7 @@
    ac_prog_version=`$MAKE --version 2>&1 | sed -n 's/^.*GNU Make[^0-9]*\([0-9][0-9.]*\).*$/\1/p'`
    case $ac_prog_version in
@@ -9,8 +9,8 @@
         ac_prog_version="$ac_prog_version, ok"; ac_verc_fail=no;;
      *) ac_prog_version="$ac_prog_version, bad"; ac_verc_fail=yes;;
  
---- ./work/glibc-2.11.1/configure 2019-09-26 17:39:57.635698227 +0000
-+++ ./work/glibc-2.11.1/configure.new     2019-09-26 17:46:53.615642407 +0000
+--- work/glibc-2.11.1/configure 2019-09-26 17:39:57.635698227 +0000
++++ work/glibc-2.11.1/configure.new     2019-09-26 17:46:53.615642407 +0000
 @@ -5235,7 +5235,7 @@
    ac_prog_version=`$MAKEINFO --version 2>&1 | sed -n 's/^.*GNU texinfo.* \([0-9][0-9.]*\).*$/\1/p'`
    case $ac_prog_version in
@@ -29,8 +29,8 @@
    case $ac_prog_version in
      '') ac_prog_version="v. ?.??, bad"; ac_verc_fail=yes;;
      3.0[2-9]*|3.[1-9]*|[4-9]*)
---- ./work/glibc-2.11.1/configure	2019-10-04 16:24:17.363256102 +0000
-+++ ./work/glibc-2.11.1/configure.new	2019-10-04 16:43:14.079452043 +0000
+--- work/glibc-2.11.1/configure	2019-10-04 16:24:17.363256102 +0000
++++ work/glibc-2.11.1/configure.new	2019-10-04 16:43:14.079452043 +0000
 @@ -875,6 +875,7 @@
  # Use braces instead of parens because sh, perl, etc. also accept them.
  # (The list follows the same order as the GNU Coding Standards.)
@@ -58,3 +58,25 @@
    { $as_echo "$as_me:$LINENO: result: $MAKEINFO" >&5
  $as_echo "$MAKEINFO" >&6; }
  else
+--- work/glibc-2.11.1/configure	2019-10-04 17:01:02.964437984 +0000
++++ work/glibc-2.11.1/configure.new	2019-10-04 17:20:36.464594375 +0000
+@@ -5197,7 +5197,7 @@
+ if test "${ac_cv_prog_MAKEINFO+set}" = set; then
+   $as_echo_n "(cached) " >&6
+ else
+-  if test -n "$MAKEINFO"; then
++  if test -n "$MAKEINFO" && [ "$disablemakeinfo" == false ]; then
+   ac_cv_prog_MAKEINFO="$MAKEINFO" # Let the user override the test.
+ else
+ as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+--- work/glibc-2.11.1/configure	2019-10-04 17:21:24.604595949 +0000
++++ work/glibc-2.11.1/configure.new	2019-10-04 17:27:38.576604426 +0000
+@@ -5230,7 +5230,7 @@
+   test -n "$MAKEINFO" && break
+ done
+ 
+-if test -z "$MAKEINFO"; then
++if test -z "$MAKEINFO" || [ "$disablemakeinfo" == true ]; then
+   ac_verc_fail=yes
+ else
+   # Found it, now check the version.

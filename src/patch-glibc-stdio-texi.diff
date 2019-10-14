@@ -1,5 +1,5 @@
---- ./work/glibc-2.11.1/manual/stdio.texi     2009-12-08 20:10:20.000000000 +0000
-+++ ./work/glibc-2.11.1/manual/stdio.texi.new 2019-10-03 16:24:57.935034283 +0000
+--- ./work/glibc-2.11.1/manual/stdio.texi	2009-12-08 20:10:20.000000000 +0000
++++ ./work/glibc-2.11.1/manual/stdio.texi.new	2019-10-03 16:24:57.935034283 +0000
 @@ -3119,7 +3119,7 @@
  etc.  The full table is:
  

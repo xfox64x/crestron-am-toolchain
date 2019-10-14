@@ -1,7 +1,8 @@
---- ./work/glibc-2.11.1/elf/ldd.bash.in   2009-12-08 20:10:20.000000000 +0000
-+++ ./work/glibc-2.11.1/elf/ldd.bash.in.new       2019-10-03 17:18:27.738711050 +0000
+--- ./work/glibc-2.11.1/elf/ldd.bash.in	2009-12-08 20:10:20.000000000 +0000
++++ ./work/glibc-2.11.1/elf/ldd.bash.in.new	2019-10-03 17:18:27.738711050 +0000
 @@ -1,4 +1,4 @@
 -#! @BASH@
 +#! /bin/bash
  # Copyright (C) 1996-2008, 2009 Free Software Foundation, Inc.
  # This file is part of the GNU C Library.
+ 
